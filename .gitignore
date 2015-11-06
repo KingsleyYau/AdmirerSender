@@ -73,3 +73,18 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+.cproject
+
+*.xml
+
+.cproject
+
+.cproject
+
+.cproject
+.settings/org.eclipse.cdt.codan.core.prefs
+
+.project
+
+*.prefs
