@@ -28,7 +28,7 @@ typedef enum HttpType {
 	GET,
 	POST,
 	UNKNOW,
-};
+} HTTPTYPE;
 
 class DataHttpParser : public DataParser {
 public:
@@ -37,8 +37,8 @@ public:
 
 	int ParseData(char* buffer, int len);
 
-	const string& GetParam(const char* key);
-	const string& GetPath();
+	const char* GetParam(const char* key);
+	const char* GetPath();
 	HttpType GetType();
 
 	void Reset();

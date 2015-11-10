@@ -556,7 +556,8 @@ void AdmirerSender::GetAgentSendStatus(
 			"AdmirerSender::GetAgentSendStatus( "
 			"tid : %d, "
 			"m->fd: [%d], "
-			"agentId : %s "
+			"agentId : %s, "
+			"start "
 			")",
 			(int)syscall(SYS_gettid),
 			m->fd,
@@ -572,6 +573,19 @@ void AdmirerSender::GetAgentSendStatus(
 		}
 	}
 	mAgentMap.Unlock();
+
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"AdmirerSender::GetAgentSendStatus( "
+			"tid : %d, "
+			"m->fd: [%d], "
+			"agentId : %s, "
+			"end "
+			")",
+			(int)syscall(SYS_gettid),
+			m->fd,
+			agentId
+			);
 
 	statusNode = (int)bFlag;
 }
@@ -739,7 +753,8 @@ void AdmirerSender::StateRunnableHandle() {
 }
 
 void AdmirerSender::SendRunnableHandle() {
-	LogManager::GetLogManager()->Log(LOG_STAT,
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
 			"AdmirerSender::SendRunnableHandle( "
 			"tid : %d "
 			")",
@@ -767,7 +782,7 @@ void AdmirerSender::SendRunnableHandle() {
 				if( !bFlag ) {
 					// Check error code
 					switch( sender->GetErrorCode() ) {
-					case SEND_FIAL_TOO_MORE_TIME:{
+					case SEND_FIAL_TOO_MORE_TIME: {
 						// Remove letter from Agent
 						RemoveLadyFromAgent(sender->GetAgentId());
 
@@ -803,6 +818,15 @@ void AdmirerSender::SendRunnableHandle() {
 					")",
 					(int)syscall(SYS_gettid),
 					iHandleTime
+					);
+
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"AdmirerSender::SendRunnableHandle( "
+					"tid : %d "
+					"######################################## "
+					")",
+					(int)syscall(SYS_gettid)
 					);
 
 			sleep(1);

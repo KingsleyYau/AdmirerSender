@@ -45,12 +45,11 @@ bool LadyDBLetterSender::SendLetter() {
 	}
 
 	// 获取模板
-	list<string> templateList;
-	mpDBManager->GetTemplateList(mLady, regulation, templateList);
-	if( !templateList.empty() ) {
-		int r = rand() % templateList.size();
+	mpDBManager->GetLadyRegulationInfo(mLady, regulation);
+	if( !mLady.mTemplateList.empty() ) {
+		int r = rand() % mLady.mTemplateList.size();
 		int i = 0;
-		for(list<string>::iterator itr = templateList.begin(); itr != templateList.end(); itr++, i++) {
+		for(list<string>::iterator itr = mLady.mTemplateList.begin(); itr != mLady.mTemplateList.end(); itr++, i++) {
 			if( r == i ) {
 				templateCode = *itr;
 				break;

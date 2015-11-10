@@ -14,7 +14,7 @@ using namespace std;
 typedef enum ErrorCode {
 	NONE,
 	SEND_FIAL_TOO_MORE_TIME,
-};
+} ERRORCODE;
 
 class ILetterSender {
 public:

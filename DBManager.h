@@ -121,12 +121,11 @@ public:
 	bool CanSendLetter(const Lady& lady);
 
 	/**
-	 * 获取女士条件模板
+	 * 获取女士条件和模板
 	 * @param lady				女士
 	 * @param regulation 		规则号
-	 * @param templateList[out]	模板号列表
 	 */
-	bool GetTemplateList(const Lady& lady, const string& regulation, list<string>& templateList);
+	bool GetLadyRegulationInfo(Lady& lady, const string& regulation);
 
 	/**
 	 * 男士是否可收意向信
@@ -163,6 +162,10 @@ private:
 	 */
 	int GetIndexBySiteId(int siteId);
 
+	/**
+	 * 获取女士自定义条件,数据库查找字符串
+	 */
+	string GetLadyConditionString(const Lady& lady);
 
 	DBSpool mDBSpool;
 	DBSpool mDBSpoolLady[4];
