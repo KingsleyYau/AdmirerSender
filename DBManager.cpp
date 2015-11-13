@@ -791,7 +791,7 @@ bool DBManager::CanRecvLetter(
 	}
 
 	/**
-	 * 3.检查是否有EMF通信关系或者女士是否给男士发过发过首封EMF
+	 * 3.检查是否有EMF通信关系或者女士是否给男士发过首封EMF
 	 * 检查男士是否发过BP信件给女士
 	 */
 	if( bFlag ) {
@@ -1248,15 +1248,19 @@ bool DBManager::SendLetter(
 				);
 
 		snprintf(sql, MAXSQLSIZE - 1,
+//				"SELECT info_core.manid, info_basic.firstname, info_core.paid_amount "
+//				"FROM info_core info_basic, info_site_%s, stats_admire_%s "
+//				"WHERE info_core.manid = info_basic.manid "
+//				"AND info_core.manid = info_site_%s.manid "
+//				"AND info_core.manid = stats_admire_%s.manid "
 				"SELECT info_core.manid, info_basic.firstname, info_core.paid_amount "
-				"FROM info_core, info_basic, info_desc, info_site_%s, info_match_%s, stats_admire_%s "
-				"WHERE info_core.manid = info_basic.manid "
-				"AND info_core.manid = info_desc.manid "
-				"AND info_core.manid = info_site_%s.manid "
-				"AND info_core.manid = info_match_%s.manid "
-				"AND info_core.manid = stats_admire_%s.manid "
+				"FROM info_core "
+				"LEFT JOIN info_basic ON info_core.manid = info_basic.manid "
+				"LEFT JOIN info_desc ON info_core.manid = info_desc.manid "
+				"LEFT JOIN info_site_%s ON info_core.manid = info_site_%s.manid "
+				"LEFT JOIN stats_admire_%s ON info_core.manid = stats_admire_%s.manid "
 				// 女士自定义条件start
-				"AND %s "
+				"WHERE %s "
 				// 女士自定义条件end
 				"AND info_core.status = 0 "
 				"AND "
@@ -1278,8 +1282,6 @@ bool DBManager::SendLetter(
 				") "
 				"ORDER BY stats_admire_%s.sent DESC "
 				";",
-				mpDbLady[iIndex].mPostfix.c_str(),
-				mpDbLady[iIndex].mPostfix.c_str(),
 				mpDbLady[iIndex].mPostfix.c_str(),
 				mpDbLady[iIndex].mPostfix.c_str(),
 				mpDbLady[iIndex].mPostfix.c_str(),
@@ -1373,15 +1375,19 @@ bool DBManager::SendLetter(
 					);
 
 			snprintf(sql, MAXSQLSIZE - 1,
+//					"SELECT info_core.manid, info_basic.firstname, info_core.paid_amount "
+//					"FROM info_core, info_basic, info_site_%s, stats_admire_%s "
+//					"WHERE info_core.manid = info_basic.manid "
+//					"AND info_core.manid = info_site_%s.manid "
+//					"AND info_core.manid = stats_admire_%s.manid "
 					"SELECT info_core.manid, info_basic.firstname, info_core.paid_amount "
-					"FROM info_core, info_basic, info_desc, info_site_%s, info_match_%s, stats_admire_%s "
-					"WHERE info_core.manid = info_basic.manid "
-					"AND info_core.manid = info_desc.manid "
-					"AND info_core.manid = info_site_%s.manid "
-					"AND info_core.manid = info_match_%s.manid "
-					"AND info_core.manid = stats_admire_%s.manid "
+					"FROM info_core "
+					"LEFT JOIN info_basic ON info_core.manid = info_basic.manid "
+					"LEFT JOIN info_desc ON info_core.manid = info_desc.manid "
+					"LEFT JOIN info_site_%s ON info_core.manid = info_site_%s.manid "
+					"LEFT JOIN stats_admire_%s ON info_core.manid = stats_admire_%s.manid "
 					// 女士自定义条件start
-					"AND %s "
+					"WHERE %s "
 					// 女士自定义条件end
 					"AND info_core.status = 0 "
 					"AND "
@@ -1402,8 +1408,6 @@ bool DBManager::SendLetter(
 					") "
 					"ORDER BY stats_admire_%s.sent DESC "
 					";",
-					mpDbLady[iIndex].mPostfix.c_str(),
-					mpDbLady[iIndex].mPostfix.c_str(),
 					mpDbLady[iIndex].mPostfix.c_str(),
 					mpDbLady[iIndex].mPostfix.c_str(),
 					mpDbLady[iIndex].mPostfix.c_str(),

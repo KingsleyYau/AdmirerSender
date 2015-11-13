@@ -40,6 +40,10 @@ public:
 		return itr;
 	}
 
+	void Clear() {
+		mMap.clear();
+	}
+
 	void Lock() {
 		mKMutex.lock();
 	}

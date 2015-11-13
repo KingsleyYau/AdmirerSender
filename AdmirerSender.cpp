@@ -399,6 +399,7 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 
 	Json::FastWriter writer;
 	Json::Value rootSend;
+	rootSend["ret"] = 0;
 
 	if( m == NULL ) {
 		return ret;
@@ -452,8 +453,15 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 					GetAgentSendStatus(statusNode, (char*)pAgentId, m);
 
 					rootSend["status"] = statusNode;
+					rootSend["ret"] = 1;
 					ret = 1;
 				}
+				param = writer.write(rootSend);
+
+			} else if( strcmp(pPath, "/CLEARLETTERSENDLIST") == 0 ) {
+				ClearLetterSendList(m);
+				rootSend["ret"] = 1;
+				ret = 1;
 				param = writer.write(rootSend);
 
 			} else {
@@ -588,6 +596,45 @@ void AdmirerSender::GetAgentSendStatus(
 			);
 
 	statusNode = (int)bFlag;
+}
+
+/**
+ * 清空发送队列
+ */
+void AdmirerSender::ClearLetterSendList(
+		Message *m
+		) {
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"AdmirerSender::ClearLetterSendList( "
+			"tid : %d, "
+			"m->fd: [%d], "
+			"start "
+			")",
+			(int)syscall(SYS_gettid),
+			m->fd
+			);
+	bool bFlag = false;
+
+	ILetterSender* sender;
+	while( (sender = mLadyLetterList.PopFront()) != NULL ) {
+		delete sender;
+	}
+
+	mAgentMap.Lock();
+	mAgentMap.Clear();
+	mAgentMap.Unlock();
+
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"AdmirerSender::ClearLetterSendList( "
+			"tid : %d, "
+			"m->fd: [%d], "
+			"end "
+			")",
+			(int)syscall(SYS_gettid),
+			m->fd
+			);
 }
 
 void AdmirerSender::OnGetLady(

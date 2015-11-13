@@ -93,6 +93,13 @@ private:
 			Message *m
 			);
 
+	/**
+	 * 清空发送队列
+	 */
+	void ClearLetterSendList(
+			Message *m
+			);
+
 	TcpServer mClientTcpServer;
 	DBManager mDBManager;
 
