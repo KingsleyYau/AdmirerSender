@@ -9,6 +9,16 @@
 #ifndef TCPSERVER_H_
 #define TCPSERVER_H_
 
+
+#include <ev.h>
+
+#include "MessageList.h"
+#include "LogManager.h"
+
+#include <common/KThread.h>
+#include <common/KSafeList.h>
+#include <common/TimeProc.hpp>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,13 +33,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/tcp.h>
-
-#include <ev.h>
-
-#include "KThread.h"
-#include "MessageList.h"
-#include "LogManager.h"
-#include "KSafeList.h"
 
 //typedef list<ev_io *> WatcherList;
 typedef KSafeList<ev_io *> WatcherList;

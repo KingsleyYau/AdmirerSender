@@ -7,15 +7,41 @@
 
 #include "DBManager.h"
 
-#define MAXSQLSIZE 100 * 1024
+#define MAXSQLSIZE 1024
+#define MAXBIGSQLSIZE 100 * 1024
+#define MAXMANCOUNT 100 * 1000
+
+class SyncRunnable : public KRunnable {
+public:
+	SyncRunnable(DBManager* pDBManager) {
+		mpDBManager = pDBManager;
+	}
+	virtual ~SyncRunnable() {
+	}
+protected:
+	void onRun() {
+		mpDBManager->HandleSyncDatabase();
+	}
+	DBManager* mpDBManager;
+};
 
 DBManager::DBManager() {
 	// TODO Auto-generated constructor stub
+	sqlite3_config(SQLITE_CONFIG_MEMSTATUS, false);
+
 	mpDBManagerCallback = NULL;
+	mbSyncForce = false;
+	mpSyncRunnable = new SyncRunnable(this);
 }
 
 DBManager::~DBManager() {
 	// TODO Auto-generated destructor stub
+	mSyncThread.stop();
+
+	if( mpSyncRunnable != NULL ) {
+		delete mpSyncRunnable;
+	}
+
 }
 
 bool DBManager::Init(
@@ -32,7 +58,13 @@ bool DBManager::Init(
 	miDbCount = iDbCount;
 	mpDbLady = (DBSTRUCT*)dbLady;
 
-	bFlag = mDBSpool.SetConnection(2 * mDbMan.miMaxDatabaseThread);
+	int ret = sqlite3_open(":memory:", &mdb);
+//	int ret = sqlite3_open("memory.db", &mdb);
+	if( ret == SQLITE_OK && CreateTable(mdb) ) {
+		bFlag = ExecSQL(mdb, (char*)"PRAGMA synchronous = OFF;", 0);
+	}
+
+	bFlag = bFlag && mDBSpool.SetConnection(2 * mDbMan.miMaxDatabaseThread);
 	bFlag = bFlag && mDBSpool.SetDBparm(
 			mDbMan.mHost.c_str(),
 			mDbMan.mPort,
@@ -110,15 +142,36 @@ bool DBManager::Init(
 				mpDbLady[i].miOverValue,
 				bFlag?"true":"false"
 				);
+
+		// 同步女士
+		SyncLadyList(mpDbLady[i].miSiteId);
 	}
 
 	printf("# DBManager initialize OK. \n");
+
+	if( bFlag ) {
+		printf("# DBManager synchronizing... \n");
+
+		// 同步男士
+		SyncManFromDatabase();
+
+		// Start sync thread
+		mSyncThread.start(mpSyncRunnable);
+
+		printf("# DBManager synchronizie OK. \n");
+	}
 
 	return bFlag;
 }
 
 void DBManager::SetDBManagerCallback(DBManagerCallback *pDBManagerCallback) {
 	mpDBManagerCallback = pDBManagerCallback;
+}
+
+void DBManager::SyncForce() {
+	mSyncMutex.lock();
+	mbSyncForce = true;
+	mSyncMutex.unlock();
 }
 
 void DBManager::SyncLadyList(int siteId) {
@@ -137,7 +190,7 @@ void DBManager::SyncLadyList(int siteId) {
 
 	MYSQL_RES* pSQLRes = NULL;
 	short shIdt = 0;
-	int iRows = 0;
+	int iRow = 0;
 	char sql[MAXSQLSIZE] = {'\0'};
 	int iIndex = GetIndexBySiteId(siteId);
 
@@ -161,12 +214,12 @@ void DBManager::SyncLadyList(int siteId) {
 				);
 
 		snprintf(sql, MAXSQLSIZE - 1,
-				"SELECT id, agentid, womanid, firstname, regulation, groupid, agent_follow_id, agent_follow_name, ip, computer_id "
+				"SELECT id, agentid, womanid, firstname, regulation, groupid, staff_id, staff_name, ip, computer_id "
 				"FROM admire_assistant_send "
-				"WHERE id > %d "
-				";",
-				mpDbLady[iIndex].miLastUpdate
+				"WHERE status = 1 "
+				";"
 		);
+
 		LogManager::GetLogManager()->Log(
 				LOG_MSG,
 				"DBManager::SyncLadyList( "
@@ -176,17 +229,19 @@ void DBManager::SyncLadyList(int siteId) {
 				(int)syscall(SYS_gettid),
 				sql
 				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRows) ) {
+
+		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			bFlag = true;
 			int iFields = mysql_num_fields(pSQLRes);
 			LogManager::GetLogManager()->Log(
 					LOG_MSG,
 					"DBManager::SyncLadyList( "
 					"tid : %d, "
-					"iRows : %d, "
+					"iRow : %d, "
 					"iFields : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows,
+					iRow,
 					iFields
 					);
 			if (iFields > 0) {
@@ -194,13 +249,14 @@ void DBManager::SyncLadyList(int siteId) {
 				MYSQL_ROW row;
 				fields = mysql_fetch_fields(pSQLRes);
 
-				for (int i = 0; i < iRows; i++) {
+				for (int i = 0; i < iRow; i++) {
 					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
 						break;
 					}
 
 					Lady item;
 					item.mSiteId = siteId;
+					item.mRecordId = atoi(row[0]);
 					item.mAgentId = row[1];
 					item.mWomanId = row[2];
 					item.mWomanName = row[3];
@@ -233,13 +289,25 @@ void DBManager::SyncLadyList(int siteId) {
 						mpDBManagerCallback->OnGetLady(this, item);
 					}
 
-					if( i == iRows - 1 ) {
-						mpDbLady[iIndex].miLastUpdate = atoi(row[0]);
-					}
+//					if( i == iRow - 1 ) {
+//						mpDbLady[iIndex].miLastUpdate = atoi(row[0]);
+//					}
 				}
 			}
 		}
 		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SyncLadyList( "
+					"tid : %d, "
+					"[同步女士] "
+					"失败"
+					")",
+					(int)syscall(SYS_gettid)
+					);
+		}
 	}
 
 	LogManager::GetLogManager()->Log(
@@ -247,33 +315,40 @@ void DBManager::SyncLadyList(int siteId) {
 			"DBManager::SyncLadyList( "
 			"tid : %d, "
 			"siteId : %d, "
+			"bFlag : %s, "
 			"end "
 			")",
 			(int)syscall(SYS_gettid),
-			siteId
+			siteId,
+			bFlag?"true":"false"
 			);
 }
 
 bool DBManager::CanSendLetter(
-		const Lady& lady
+		const Lady& lady,
+		const AdmireTemplate& admireTemplate
 		) {
 	const string womanId = lady.mWomanId;
 	const string agentId = lady.mAgentId;
 	int siteId = lady.mSiteId;
 
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_STAT,
 			"DBManager::CanSendLetter( "
 			"tid : %d, "
 			"womanId : %s, "
 			"agentId : %s, "
 			"siteId : %d, "
+			"templateCode : %s, "
+			"templateType : %s "
 			"start "
 			")",
 			(int)syscall(SYS_gettid),
 			womanId.c_str(),
 			agentId.c_str(),
-			siteId
+			siteId,
+			admireTemplate.templateCode.c_str(),
+			admireTemplate.templateType.c_str()
 			);
 
 	unsigned int iHandleTime = GetTickCount();
@@ -283,10 +358,11 @@ bool DBManager::CanSendLetter(
 	RESDataList res;
 	MYSQL_RES* pSQLRes = NULL;
 	short shIdt = 0;
-	int iRows = 0;
+	int iRow = 0;
 	char sql[MAXSQLSIZE] = {'\0'};
 
 	int iAdmireMax = 0;
+	int iAdmireMax2 = 0;
 	int iAdmireSumBalance = 0;
 
 	int iIndex = GetIndexBySiteId(siteId);
@@ -296,6 +372,9 @@ bool DBManager::CanSendLetter(
 
 	/**
 	 * 1.检查女士资料
+	 * 1.1检查女士是否由发送意向信的权限（我司设定）
+	 * 检测女士所在机构是否已开启自动发送意向信的权限
+	 * 检测女士是否已开启自动发送意向信的权限
 	 */
 	if( bFlag ) {
 		bFlag = false;
@@ -308,21 +387,27 @@ bool DBManager::CanSendLetter(
 				")",
 				(int)syscall(SYS_gettid)
 				);
+
 		snprintf(sql, MAXSQLSIZE - 1,
-				"SELECT groupid "
-				"FROM woman "
-				"WHERE womanid = '%s' "
-				"AND status1 IN ('0','2') "
-				"AND deleted = '0' "
-				"AND owner = '%s' "
-				"AND black = 'N' "
-				"AND problem = '0' "
-				"AND ordervalue >= %d "
+				"SELECT woman.groupid "
+				"FROM woman, woman_priv "
+				"WHERE woman.womanid = '%s' "
+				"AND woman.womanid = woman_priv.womanid "
+				"AND woman.status1 IN ('0','2') "
+				"AND woman.deleted = '0' "
+				"AND woman.owner = '%s' "
+				"AND woman.black = 'N' "
+				"AND woman.problem = '0' "
+				"AND woman.ordervalue >= %d "
+				"AND woman_priv.admire_assistant_send = 1 "
+				"AND woman_priv.admire_assistant_send2 = 1 "
+				"AND woman_priv.admirer2 != 0 "
 				";",
 				womanId.c_str(),
 				agentId.c_str(),
 				mpDbLady[iIndex].miOverValue
 		);
+
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
 				"DBManager::CanSendLetter( "
@@ -332,17 +417,18 @@ bool DBManager::CanSendLetter(
 				(int)syscall(SYS_gettid),
 				sql
 				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRows) ) {
+
+		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
 			int iFields = mysql_num_fields(pSQLRes);
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
 					"DBManager::CanSendLetter( "
 					"tid : %d, "
-					"iRows : %d, "
+					"iRow : %d, "
 					"iFields : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows,
+					iRow,
 					iFields
 					);
 			if (iFields > 0) {
@@ -350,22 +436,35 @@ bool DBManager::CanSendLetter(
 				MYSQL_ROW row;
 				fields = mysql_fetch_fields(pSQLRes);
 
-				for (int i = 0; i < iRows; i++) {
+				for (int i = 0; i < iRow; i++) {
 					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
 						break;
 					}
 
 					bFlag = true;
-
-					string groupId;
 				}
 			}
 		}
 		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::CanSendLetter( "
+					"tid : %d, "
+					"[1.检查女士资料] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		}
 	}
 
 	/**
 	 * 4.检查代理机构是否开通意向信
+	 * 发送意向信不超過机构设定值
 	 */
 	if( bFlag ) {
 		bFlag = false;
@@ -380,13 +479,15 @@ bool DBManager::CanSendLetter(
 				);
 
 		snprintf(sql, MAXSQLSIZE - 1,
-				"SELECT admire_max, admire_sum_balance "
+				"SELECT admire_max, admire_max2, admire_sum_balance "
 				"FROM agent "
 				"WHERE agentid = '%s' "
 				"AND admirers = 'Y' "
+				"AND admire_assistant_send = 'Y' "
 				";",
 				agentId.c_str()
 		);
+
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
 				"DBManager::CanSendLetter( "
@@ -396,17 +497,18 @@ bool DBManager::CanSendLetter(
 				(int)syscall(SYS_gettid),
 				sql
 				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRows) ) {
+
+		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
 			int iFields = mysql_num_fields(pSQLRes);
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
 					"DBManager::CanSendLetter( "
 					"tid : %d, "
-					"iRows : %d, "
+					"iRow : %d, "
 					"iFields : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows,
+					iRow,
 					iFields
 					);
 			if (iFields > 0) {
@@ -414,14 +516,17 @@ bool DBManager::CanSendLetter(
 				MYSQL_ROW row;
 				fields = mysql_fetch_fields(pSQLRes);
 
-				for (int i = 0; i < iRows; i++) {
+				for (int i = 0; i < iRow; i++) {
 					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
 						break;
 					}
 
+					// 模板为A类, 机构允许最大值
 					iAdmireMax = atoi(row[0]);
-					iAdmireSumBalance = atoi(row[1]);
+					// 模板为B类, 机构允许最大值
+					iAdmireMax2 = atoi(row[1]);
 
+					iAdmireSumBalance = atoi(row[2]);
 					if( iAdmireSumBalance > 0 ) {
 						bFlag = true;
 					}
@@ -429,68 +534,27 @@ bool DBManager::CanSendLetter(
 			}
 		}
 		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
-	}
 
-	/**
-	 * 1.1检查女士是否由发送意向信的权限（我司设定）
-	 */
-	if( bFlag ) {
-
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanSendLetter( "
-				"tid : %d, "
-				"[1.1检查女士是否由发送意向信的权限] "
-				")",
-				(int)syscall(SYS_gettid)
-				);
-
-		snprintf(sql, MAXSQLSIZE - 1,
-				"SELECT count(*) "
-				"FROM woman_priv "
-				"WHERE womanid = '%s' "
-				"AND admirer2 = 0 "
-				";",
-				womanId.c_str()
-		);
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanSendLetter( "
-				"tid : %d, "
-				"sql : %s "
-				")",
-				(int)syscall(SYS_gettid),
-				sql
-				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
+		if( !bFlag ) {
 			LogManager::GetLogManager()->Log(
-					LOG_STAT,
+					LOG_MSG,
 					"DBManager::CanSendLetter( "
 					"tid : %d, "
-					"iRows : %d "
+					"[4.检查代理机构是否开通意向信] "
+					"失败, "
+					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows
+					sql
 					);
-			if( !res.empty() ) {
-				if( res.front() != "0" ) {
-					bFlag = false;
-				}
-			}
 		}
 	}
-
-	/**
-	 * 检测女士所在机构是否已开启自动发送意向信的权限
-	 */
-	/**
-	 * 检测女士是否已开启自动发送意向信的权限
-	 */
 
 	/**
 	 * 7.同一女士一天內發送意向信不能超過机构设定值
 	 */
 	if( bFlag ) {
+		bFlag = false;
 
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
@@ -507,10 +571,13 @@ bool DBManager::CanSendLetter(
 				"WHERE womanid = '%s' "
 				"AND agent = '%s' "
 				"AND adddate >= CURDATE() "
+				"AND template_type = '%s' "
 				";",
 				womanId.c_str(),
-				agentId.c_str()
+				agentId.c_str(),
+				admireTemplate.templateType.c_str()
 		);
+
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
 				"DBManager::CanSendLetter( "
@@ -520,21 +587,60 @@ bool DBManager::CanSendLetter(
 				(int)syscall(SYS_gettid),
 				sql
 				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
+
+		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
 					"DBManager::CanSendLetter( "
 					"tid : %d, "
-					"iRows : %d "
+					"iRow : %d, "
+					"iFields : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows
+					iRow,
+					iFields
 					);
-			if( !res.empty() ) {
-				if( atoi(res.front().c_str()) >= iAdmireMax ) {
-					bFlag = false;
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+
+					if( admireTemplate.templateType == "A" ) {
+						if( atoi(row[0]) < iAdmireMax ) {
+							bFlag = true;
+						}
+					}
+
+					if( admireTemplate.templateType == "B" ) {
+						if( atoi(row[0]) < iAdmireMax2 ) {
+							bFlag = true;
+						}
+					}
+
+					break;
 				}
 			}
+		}
+		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::CanSendLetter( "
+					"tid : %d, "
+					"[7.同一女士一天內發送意向信不能超過机构设定值] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
 		}
 	}
 
@@ -542,7 +648,7 @@ bool DBManager::CanSendLetter(
 	 * 9.女士在5天內EMF通信关系不超过8对
 	 */
 	if( bFlag ) {
-
+		bFlag = false;
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
 				"DBManager::CanSendLetter( "
@@ -562,6 +668,7 @@ bool DBManager::CanSendLetter(
 				";",
 				womanId.c_str()
 		);
+
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
 				"DBManager::CanSendLetter( "
@@ -571,28 +678,53 @@ bool DBManager::CanSendLetter(
 				(int)syscall(SYS_gettid),
 				sql
 				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
+
+		res.clear();
+		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRow) ) {
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
 					"DBManager::CanSendLetter( "
 					"tid : %d, "
-					"iRows : %d "
+					"iRow : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows
+					iRow
 					);
 			if( !res.empty() ) {
-				if( res.front() != "0" ) {
-					bFlag = false;
+				LogManager::GetLogManager()->Log(
+						LOG_STAT,
+						"DBManager::CanSendLetter( "
+						"tid : %d, "
+						"res.front().c_str() : %s "
+						")",
+						(int)syscall(SYS_gettid),
+						res.front().c_str()
+						);
+				if( atoi(res.front().c_str()) == 0 ) {
+					bFlag = true;
 				}
 			}
+		}
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::CanSendLetter( "
+					"tid : %d, "
+					"[9.女士在5天內EMF通信关系不超过8对] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
 		}
 	}
 
 	iHandleTime =  GetTickCount() - iHandleTime;
 
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_STAT,
 			"DBManager::CanSendLetter( "
 			"tid : %d, "
 			"bFlag : %s, "
@@ -636,7 +768,7 @@ bool DBManager::GetLadyRegulationInfo(
 
 	MYSQL_RES* pSQLRes = NULL;
 	short shIdt = 0;
-	int iRows = 0;
+	int iRow = 0;
 	char sql[MAXSQLSIZE] = {'\0'};
 
 	int iIndex = GetIndexBySiteId(siteId);
@@ -657,16 +789,16 @@ bool DBManager::GetLadyRegulationInfo(
 				);
 
 		snprintf(sql, MAXSQLSIZE - 1,
-				"SELECT template, man_age1, man_age2, country, marry, children, photo, ethnicity, religion, is_birthday "
+				"SELECT template, man_age1, man_age2, country, marry, children, photo, ethnicity, religion, is_birthday, name "
 				"FROM admire_assistant_regulation "
 				"WHERE id = %s "
-				"AND womanid = '%s' "
-				"AND agentid = '%s' "
+//				"AND womanid = '%s' "
+//				"AND agentid = '%s' "
 				"LIMIT 1 "
 				";",
-				regulation.c_str(),
-				womanId.c_str(),
-				agentId.c_str()
+				regulation.c_str()
+//				womanId.c_str(),
+//				agentId.c_str()
 		);
 
 		LogManager::GetLogManager()->Log(
@@ -679,17 +811,17 @@ bool DBManager::GetLadyRegulationInfo(
 				sql
 				);
 
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRows) ) {
+		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
 			int iFields = mysql_num_fields(pSQLRes);
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
 					"DBManager::GetLadyRegulationInfo( "
 					"tid : %d, "
-					"iRows : %d, "
+					"iRow : %d, "
 					"iFields : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows,
+					iRow,
 					iFields
 					);
 
@@ -698,7 +830,7 @@ bool DBManager::GetLadyRegulationInfo(
 				MYSQL_ROW row;
 				fields = mysql_fetch_fields(pSQLRes);
 
-				for (int i = 0; i < iRows; i++) {
+				for (int i = 0; i < iRow; i++) {
 					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
 						break;
 					}
@@ -716,7 +848,12 @@ bool DBManager::GetLadyRegulationInfo(
 				    while( pos != string::npos ) {
 				    	templateCode = templates.substr(index, pos - index);
 				    	if( templateCode.length() > 0 ) {
-				    		lady.mTemplateList.push_back(templateCode);
+				    		AdmireTemplate admireTemplate;
+				    		admireTemplate.templateCode = templateCode;
+
+				    		if( GetTemplateInfo(lady, admireTemplate) ) {
+				    			lady.mTemplateList.push_back(admireTemplate);
+				    		}
 				    	}
 
 				    	index = pos + 1;
@@ -724,19 +861,162 @@ bool DBManager::GetLadyRegulationInfo(
 				    }
 
 				    // 填充条件
-				    lady.mAgeStart = row[1];
-					lady.mAgeEnd = row[2];
+				    lady.mAgeStart = row[2];
+					lady.mAgeEnd = row[1];
 					lady.mCountry = row[3];
 					lady.mMarry = row[4];
 					lady.mChildren = row[5];
 					lady.mPhoto = row[6];
 					lady.mEthnicity = row[7];
 					lady.mReligion = row[8];
-					lady.mIsBirthday = (strcmp((row[9]), "0") == 0)?false:true;
+					lady.mIsBirthday = atoi(row[9]);
+					lady.mManName = row[10];
 				}
 			}
 		}
 		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::GetLadyRegulationInfo( "
+					"tid : %d, "
+					"[获取模板] "
+					"失败"
+					")",
+					(int)syscall(SYS_gettid)
+					);
+		}
+	}
+
+	return bFlag;
+}
+
+/**
+ * 获取女士模板详情
+ * @description 			数据库->内存
+ * @param lady				女士
+ * @param regulation 		模板号
+ */
+bool DBManager::GetTemplateInfo(Lady& lady, AdmireTemplate& admireTemplate) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::GetTemplateInfo( "
+			"tid : %d, "
+			"[获取模板详情和附件], "
+			"womanId : %s, "
+			"siteId : %d, "
+			"templateCode : %s, "
+			"start "
+			")",
+			(int)syscall(SYS_gettid),
+			lady.mWomanId.c_str(),
+			lady.mSiteId,
+			admireTemplate.templateCode.c_str()
+			);
+
+	bool bFlag = false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	int iIndex = GetIndexBySiteId(lady.mSiteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	if( bFlag ) {
+		bFlag = false;
+
+		// 获取模板类型
+		snprintf(sql, MAXBIGSQLSIZE - 1,
+				"SELECT attachment, at_greet, at_content_en, at_show_cn, at_content_cn, template_type, vg_id "
+				"FROM admire_template "
+				"WHERE at_id = %s "
+				"LIMIT 1 "
+				";",
+				admireTemplate.templateCode.c_str()
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::GetTemplateInfo( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::GetTemplateInfo( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+					bFlag = true;
+
+					// 分割附件
+					string attachments = row[0];
+					attachments += "|";
+
+					string attachment;
+				    int index = 0;
+				    string::size_type pos;
+				    pos = attachments.find("|", index);
+				    while( pos != string::npos ) {
+				    	attachment = attachments.substr(index, pos - index);
+				    	if( attachment.length() > 0 ) {
+				    		admireTemplate.attachmentList.push_back(attachment);
+				    	}
+
+				    	index = pos + 1;
+						pos = attachments.find(",", index);
+				    }
+
+					admireTemplate.at_greet = row[1];
+					admireTemplate.at_content_en = row[2];
+					admireTemplate.at_show_cn = row[3];
+					admireTemplate.at_content_cn = row[4];
+					admireTemplate.templateType = row[5];
+					admireTemplate.vg_id = row[6];
+
+					break;
+				}
+			}
+		}
+		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::GetTemplateInfo( "
+					"tid : %d, "
+					"[获取模板详情和附件] "
+					"失败"
+					")",
+					(int)syscall(SYS_gettid)
+					);
+		}
 	}
 
 	return bFlag;
@@ -747,21 +1027,6 @@ bool DBManager::CanRecvLetter(
 		const Man& man
 		) {
 
-	const string womanId = lady.mWomanId;
-	const string womanName = lady.mWomanName;
-	const string agentId = lady.mAgentId;
-	const string agentStaff = lady.mAagentStaff;
-	const string agentStaffName = lady.mAagentStaffName;
-	const string groupId = lady.mGroupId;
-	int siteId = lady.mSiteId;
-
-	const string manId = man.mManId;
-	const string manName = man.mManName;
-	int paidAmount = man.mPaidAmount;
-
-	bool bPayMember = (paidAmount > 0)?true:false;
-	int iAgentMaxnumin24hour = (paidAmount > 0)?5:100;
-
 	LogManager::GetLogManager()->Log(
 			LOG_STAT,
 			"DBManager::CanRecvLetter( "
@@ -771,23 +1036,32 @@ bool DBManager::CanRecvLetter(
 			"start "
 			")",
 			(int)syscall(SYS_gettid),
-			womanId.c_str(),
-			manId.c_str()
+			lady.mWomanId.c_str(),
+			man.manId.c_str()
 			);
-
-	unsigned int iHandleTime = GetTickCount();
 
 	bool bFlag = false;
 
-	RESDataList res;
-	MYSQL_RES* pSQLRes = NULL;
-	short shIdt = 0;
-	int iRows = 0;
-	char sql[MAXSQLSIZE] = {'\0'};
-	int iIndex = GetIndexBySiteId(siteId);
+	unsigned int iHandleTime = GetTickCount();
 
-	if( iIndex != INVALID_INDEX ) {
-		bFlag = true;
+	/**
+	 * 8.男士在5天內EMF通信关系超过50对
+	 * 只有是付费会员时才检测这个条件
+	 */
+	bFlag = CheckEMFCount(man);
+
+	/*
+	 * 检查男士分站信息
+	 */
+	if( bFlag ) {
+		bFlag = CheckManInfo(man, lady);
+	}
+
+	/**
+	 * 6.男士当天收到多于manmaxnumoneday封意向信即禁发
+	 */
+	if( bFlag ) {
+		bFlag = CheckAdmireCount(man, lady);
 	}
 
 	/**
@@ -795,381 +1069,42 @@ bool DBManager::CanRecvLetter(
 	 * 检查男士是否发过BP信件给女士
 	 */
 	if( bFlag ) {
-
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"[3.检查是否有EMF通信关系或者女士是否给男士发过发过首封EMF, 检查男士是否发过BP信件给女士] "
-				")",
-				(int)syscall(SYS_gettid)
-				);
-		sprintf(
-				sql,
-				"SELECT mw_num, wm_reply_num, integral "
-				"FROM relation "
-				"WHERE womanid = '%s' "
-				"AND manid = '%s' "
-				";",
-				womanId.c_str(),
-				manId.c_str()
-		);
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"sql : %s "
-				")",
-				(int)syscall(SYS_gettid),
-				sql
-				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRows) ) {
-			int iFields = mysql_num_fields(pSQLRes);
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"DBManager::CanRecvLetter( "
-					"tid : %d, "
-					"iRows : %d, "
-					"iFields : %d "
-					")",
-					(int)syscall(SYS_gettid),
-					iRows,
-					iFields
-					);
-			if (iFields > 0) {
-				MYSQL_FIELD* fields;
-				MYSQL_ROW row;
-				fields = mysql_fetch_fields(pSQLRes);
-
-				for (int i = 0; i < iRows; i++) {
-					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
-						break;
-					}
-
-					if( strcmp(row[0], "0") != 0 || strcmp(row[1], "0") != 0 ) {
-						// 检查是否有EMF通信关系或者女士是否给男士发过发过首封EMF
-						UpdateFAV(lady, man);
-						bFlag = false;
-					} else if( strcmp(row[1], "0") != 0 ){
-						// 检查男士是否发过BP信件给女士
-						bFlag = false;
-					}
-				}
-			}
-		}
-		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
+		bFlag = CheckEMF(man, lady);
 	}
 
-	/**
+	/*
 	 * 5.同一机构多个女士在短时间內向男士提交过意向信
 	 */
 	if( bFlag ) {
-
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"[5.同一机构多个女士在短时间內向男士提交过意向信] "
-				")",
-				(int)syscall(SYS_gettid)
-				);
-
-		sprintf(
-				sql,
-				"SELECT count(*) "
-				"FROM admire_temp "
-				"WHERE adddate >= DATE_SUB(NOW(), INTERVAL 1 DAY) "
-				"AND manid = '%s' "
-				"AND agent = '%s' "
-				";",
-				manId.c_str(),
-				agentId.c_str()
-		);
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"sql : %s "
-				")",
-				(int)syscall(SYS_gettid),
-				sql
-				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"DBManager::CanRecvLetter( "
-					"tid : %d, "
-					"iRows : %d "
-					")",
-					(int)syscall(SYS_gettid),
-					iRows
-					);
-
-			if( !res.empty() ) {
-				if( atoi(res.front().c_str()) >= iAgentMaxnumin24hour ) {
-					bFlag = false;
-				}
-			}
-		}
+		bFlag = CheckAdmire(man, lady);
 	}
 
 	/**
 	 * 5.1.检查该女士与该男士24小时内有没有提交过意向信
 	 */
 	if( bFlag ) {
-
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"[5.1.检查该女士与该男士24小时内有没有提交过意向信] "
-				")",
-				(int)syscall(SYS_gettid)
-				);
-
-		sprintf(
-				sql,
-				"SELECT count(*) "
-				"FROM admire_temp "
-				"WHERE adddate >= DATE_SUB(NOW(), INTERVAL 1 DAY) "
-				"AND manid = '%s' "
-				"AND womanid = '%s' "
-				";",
-				manId.c_str(),
-				womanId.c_str()
-		);
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"sql : %s "
-				")",
-				(int)syscall(SYS_gettid),
-				sql
-				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"DBManager::CanRecvLetter( "
-					"tid : %d, "
-					"iRows : %d "
-					")",
-					(int)syscall(SYS_gettid),
-					iRows
-					);
-			if( !res.empty() ) {
-				if( res.front() != "0" ) {
-					bFlag = false;
-				}
-			}
-		}
-	}
-
-	/**
-	 * 6.男士当天收到多于manmaxnumoneday封意向信即禁发
-	 */
-	if( bFlag ) {
-
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"[6.男士当天收到多于manmaxnumoneday封意向信即禁发] "
-				")",
-				(int)syscall(SYS_gettid)
-				);
-		sprintf(
-				sql,
-				"SELECT count(*) "
-				"FROM stats_admire_%s "
-				"WHERE manid = '%s' "
-				"AND sent >= 6 "
-				";",
-				mpDbLady[iIndex].mPostfix.c_str(),
-				manId.c_str()
-		);
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"sql : %s "
-				")",
-				(int)syscall(SYS_gettid),
-				sql
-				);
-		if ( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &res, iRows) ) {
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"DBManager::CanRecvLetter( "
-					"tid : %d, "
-					"iRows : %d "
-					")",
-					(int)syscall(SYS_gettid),
-					iRows
-					);
-			if( !res.empty() ) {
-				if( res.front() != "0" ) {
-					bFlag = false;
-				}
-			}
-		}
-	}
-
-	/**
-	 * 8.男士在5天內EMF通信关系超过50对
-	 * 只有是付费会员时才检测这个条件
-	 */
-	if( bFlag && bPayMember ) {
-
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"[8.男士在5天內EMF通信关系超过50对] "
-				")",
-				(int)syscall(SYS_gettid)
-				);
-		sprintf(
-				sql,
-				"SELECT count(*) "
-				"FROM hotmember "
-				"WHERE mbtype = 'm' "
-				"AND num > 50 "
-				"AND memberid = '%s' "
-				";",
-				manId.c_str()
-		);
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"sql : %s "
-				")",
-				(int)syscall(SYS_gettid),
-				sql
-				);
-		if ( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &res, iRows) ) {
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"DBManager::CanRecvLetter( "
-					"tid : %d, "
-					"iRows : %d "
-					")",
-					(int)syscall(SYS_gettid),
-					iRows
-					);
-			if( !res.empty() ) {
-				if( res.front() != "0" ) {
-					bFlag = false;
-				}
-			}
-		}
+		bFlag = CheckAdmire24Hour(man, lady);
 	}
 
 	/**
 	 * 10.检查是否男士发过CupidNote给女士
 	 */
 	if( bFlag ) {
-
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"[10.检查是否男士发过CupidNote给女士] "
-				")",
-				(int)syscall(SYS_gettid)
-				);
-		sprintf(
-				sql,
-				"SELECT count(*) "
-				"FROM cupid1 "
-				"WHERE manid = '%s' "
-				"AND womanid = '%s' "
-				"AND agentid = '%s' "
-				"AND review IN('N','Y') "
-				";",
-				manId.c_str(),
-				womanId.c_str(),
-				agentId.c_str()
-		);
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"sql : %s "
-				")",
-				(int)syscall(SYS_gettid),
-				sql
-				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"DBManager::CanRecvLetter( "
-					"tid : %d, "
-					"iRows : %d "
-					")",
-					(int)syscall(SYS_gettid),
-					iRows
-					);
-			if( !res.empty() ) {
-				if( res.front() != "0" ) {
-					bFlag = false;
-					UpdateFAV(lady, man);
-				}
-			}
-		}
+		bFlag = CheckCupidNote(man, lady);
 	}
 
 	/**
 	 * 11.检查是否发过意向信
 	 */
 	if( bFlag ) {
+		bFlag = CheckAdmireRecv(man, lady);
+	}
 
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"[11.检查是否发过意向信] "
-				")",
-				(int)syscall(SYS_gettid)
-				);
-		sprintf(
-				sql,
-				"SELECT count(*) "
-				"FROM ammsg01_new "
-				"WHERE submit_date > DATE_SUB(NOW(), INTERVAL 1 MONTH) "
-				"AND manid = '%s' "
-				"AND womanid = '%s' "
-				"AND hideflag = 'N' "
-				";",
-				manId.c_str(),
-				womanId.c_str()
-		);
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::CanRecvLetter( "
-				"tid : %d, "
-				"sql : %s "
-				")",
-				(int)syscall(SYS_gettid),
-				sql
-				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"DBManager::CanRecvLetter( "
-					"tid : %d, "
-					"iRows : %d "
-					")",
-					(int)syscall(SYS_gettid),
-					iRows
-					);
-			if( !res.empty() ) {
-				if( res.front() != "0" ) {
-					bFlag = false;
-				}
-			}
-		}
+	/*
+	 * 检查女士自定义条件
+	 */
+	if( bFlag ) {
+		bFlag = CheckLadyCondition(man, lady);
 	}
 
 	iHandleTime =  GetTickCount() - iHandleTime;
@@ -1187,13 +1122,15 @@ bool DBManager::CanRecvLetter(
 			iHandleTime
 			);
 
+	usleep(1000 * iHandleTime);
+
 	return bFlag;
 }
 
 bool DBManager::SendLetter(
 		const Lady& lady,
 		const string& regulation,
-		const string& templateCode
+		const AdmireTemplate& admireTemplate
 		) {
 	const string womanId = lady.mWomanId;
 	const string agentId = lady.mAgentId;
@@ -1206,12 +1143,14 @@ bool DBManager::SendLetter(
 			"womanId : %s, "
 			"regulation : %s, "
 			"templateCode : %s, "
+			"templateType : %s, "
 			"start "
 			")",
 			(int)syscall(SYS_gettid),
 			womanId.c_str(),
 			regulation.c_str(),
-			templateCode.c_str()
+			admireTemplate.templateCode.c_str(),
+			admireTemplate.templateType.c_str()
 			);
 
 	unsigned int iHandleTime = GetTickCount();
@@ -1224,260 +1163,101 @@ bool DBManager::SendLetter(
 		bFlag = true;
 	}
 
-	RESDataList res;
-	MYSQL_RES* pSQLRes = NULL;
-	short shIdt = 0;
-	int iRows = 0;
 	char sql[MAXSQLSIZE] = {'\0'};
-	string ladyCondition = "";
 
 	if( bFlag ) {
 		bFlag = false;
 
 		/**
-		 * 2.获取男士列表(检查男士资料情况)
-		 * 最近30天有登录过,且非最近注册(半年前注册)
+		 * 从内存表获取男士列表
 		 */
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
 				"DBManager::SendLetter( "
 				"tid : %d, "
-				"[2.获取男士列表(最近30天有登录过,且非最近注册-半年前注册)] "
+				"[从内存表获取男士列表] "
 				")",
 				(int)syscall(SYS_gettid)
 				);
 
 		snprintf(sql, MAXSQLSIZE - 1,
-//				"SELECT info_core.manid, info_basic.firstname, info_core.paid_amount "
-//				"FROM info_core info_basic, info_site_%s, stats_admire_%s "
-//				"WHERE info_core.manid = info_basic.manid "
-//				"AND info_core.manid = info_site_%s.manid "
-//				"AND info_core.manid = stats_admire_%s.manid "
-				"SELECT info_core.manid, info_basic.firstname, info_core.paid_amount "
-				"FROM info_core "
-				"LEFT JOIN info_basic ON info_core.manid = info_basic.manid "
-				"LEFT JOIN info_desc ON info_core.manid = info_desc.manid "
-				"LEFT JOIN info_site_%s ON info_core.manid = info_site_%s.manid "
-				"LEFT JOIN stats_admire_%s ON info_core.manid = stats_admire_%s.manid "
-				// 女士自定义条件start
-				"WHERE %s "
-				// 女士自定义条件end
-				"AND info_core.status = 0 "
-				"AND "
-				"( "
-				"info_core.chnlove != 0 "
-				"OR info_core.thaimatches != 0 "
-				"OR info_core.latamdate != 0 "
-				"OR info_core.charmingdate != 0 "
-				") "
-				"AND info_site_%s.permit = 'Y' "
-				"AND info_site_%s.sendadm != 0 "
-				"AND info_site_%s.sendadm2 != 0 "
-				// 最近30天有登录过,且非最近注册(半年前注册),最后登录时间倒叙
-				"AND info_core.last_login >= DATE_SUB(NOW(), INTERVAL 1 MONTH) "
-				"AND ( "
-				"info_basic.submitdate <= DATE_SUB(NOW(), INTERVAL 6 MONTH) "
-				"OR info_basic.agt_valid_%s != 1 "
-				"OR stats_admire_%s.day1 >= 6 "
-				") "
-				"ORDER BY stats_admire_%s.sent DESC "
+				"SELECT manid, manname, paid_amount, login_time, sent_%s "
+				"FROM man "
+				"WHERE can_sent_%s = 1 "
+				"ORDER BY sent_%s  "
 				";",
-				mpDbLady[iIndex].mPostfix.c_str(),
-				mpDbLady[iIndex].mPostfix.c_str(),
-				mpDbLady[iIndex].mPostfix.c_str(),
-				mpDbLady[iIndex].mPostfix.c_str(),
-				// 女士自定义条件start
-				GetLadyConditionString(lady).c_str(),
-				// 女士自定义条件end
-				mpDbLady[iIndex].mPostfix.c_str(),
-				mpDbLady[iIndex].mPostfix.c_str(),
-				mpDbLady[iIndex].mPostfix.c_str(),
 				mpDbLady[iIndex].mPostfix.c_str(),
 				mpDbLady[iIndex].mPostfix.c_str(),
 				mpDbLady[iIndex].mPostfix.c_str()
 		);
 
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::SendLetter( "
-				"tid : %d, "
-				"sql : %s "
-				")",
-				(int)syscall(SYS_gettid),
-				sql
-				);
+		bool bResult = false;
+		char** result = NULL;
+		int iRow = 0;
+		int iColumn = 0;
+		unsigned int iHandleSendListTime = GetTickCount();
 
-		unsigned int iHandleTime = GetTickCount();
-
-		if ( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &pSQLRes, shIdt, iRows) ) {
-			int iFields = mysql_num_fields(pSQLRes);
-
-			iHandleTime =  GetTickCount() - iHandleTime;
-
+		bResult = QuerySQL(mdb, sql, &result, &iRow, &iColumn, NULL);
+		if( bResult && result ) {
+			iHandleSendListTime =  GetTickCount() - iHandleSendListTime;
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
 					"DBManager::SendLetter( "
 					"tid : %d, "
-					"iRows : %d, "
-					"iFields : %d, "
-					"iHandleTime : %u ms "
+					"iRow : %d, "
+					"iColumn : %d, "
+					"iHandleSendListTime : %u ms "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows,
-					iFields,
-					iHandleTime
+					iRow,
+					iColumn,
+					iHandleSendListTime
 					);
 
-			usleep(iHandleTime * 1000);
-
-			if (iFields > 0) {
-				MYSQL_FIELD* fields;
-				MYSQL_ROW row;
-				fields = mysql_fetch_fields(pSQLRes);
-
-				for (int i = 0; i < iRows; i++) {
-					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
-						break;
-					}
-
-					Man man;
-					man.mManId = row[0];
-					man.mManName = row[1];
-					man.mPaidAmount = atoi(row[2]);
-
-					/**
-					 * 检查男士是否允许接收
-					 */
-					if( CanRecvLetter(lady, man) ) {
-						bFlag = SendLetter(lady, regulation, templateCode, man);
-						bSend = true;
-						break;
-					}
-
-					usleep(10 * 1000);
-				}
-			}
-		}
-		mDBSpool.ReleaseConnection(shIdt);
-
-		if( !bSend ) {
-			/**
-			 * 2.获取男士列表
-			 * 最近注册(半年内注册)
-			 */
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"DBManager::SendLetter( "
-					"tid : %d, "
-					"[2.获取男士列表(最近注册-半年内注册)] "
-					")",
-					(int)syscall(SYS_gettid)
-					);
-
-			snprintf(sql, MAXSQLSIZE - 1,
-//					"SELECT info_core.manid, info_basic.firstname, info_core.paid_amount "
-//					"FROM info_core, info_basic, info_site_%s, stats_admire_%s "
-//					"WHERE info_core.manid = info_basic.manid "
-//					"AND info_core.manid = info_site_%s.manid "
-//					"AND info_core.manid = stats_admire_%s.manid "
-					"SELECT info_core.manid, info_basic.firstname, info_core.paid_amount "
-					"FROM info_core "
-					"LEFT JOIN info_basic ON info_core.manid = info_basic.manid "
-					"LEFT JOIN info_desc ON info_core.manid = info_desc.manid "
-					"LEFT JOIN info_site_%s ON info_core.manid = info_site_%s.manid "
-					"LEFT JOIN stats_admire_%s ON info_core.manid = stats_admire_%s.manid "
-					// 女士自定义条件start
-					"WHERE %s "
-					// 女士自定义条件end
-					"AND info_core.status = 0 "
-					"AND "
-					"("
-					"info_core.chnlove != 0 "
-					"OR info_core.thaimatches != 0 "
-					"OR info_core.latamdate != 0 "
-					"OR info_core.charmingdate != 0"
-					") "
-					"AND info_site_%s.permit = 'Y' "
-					"AND info_site_%s.sendadm != 0 "
-					"AND info_site_%s.sendadm2 != 0 "
-					// 最近注册(半年内注册),注册时间倒叙
-					"AND ( "
-					"info_basic.submitdate > DATE_SUB(NOW(), INTERVAL 6 MONTH) "
-					"AND info_basic.agt_valid_%s = 1 "
-					"AND stats_admire_%s.day1 < 6 "
-					") "
-					"ORDER BY stats_admire_%s.sent DESC "
-					";",
-					mpDbLady[iIndex].mPostfix.c_str(),
-					mpDbLady[iIndex].mPostfix.c_str(),
-					mpDbLady[iIndex].mPostfix.c_str(),
-					mpDbLady[iIndex].mPostfix.c_str(),
-					// 女士自定义条件start
-					GetLadyConditionString(lady).c_str(),
-					// 女士自定义条件end
-					mpDbLady[iIndex].mPostfix.c_str(),
-					mpDbLady[iIndex].mPostfix.c_str(),
-					mpDbLady[iIndex].mPostfix.c_str(),
-					mpDbLady[iIndex].mPostfix.c_str(),
-					mpDbLady[iIndex].mPostfix.c_str(),
-					mpDbLady[iIndex].mPostfix.c_str()
-			);
-
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"DBManager::SendLetter( "
-					"tid : %d, "
-					"sql : %s "
-					")",
-					(int)syscall(SYS_gettid),
-					sql
-					);
-
-			if ( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &pSQLRes, shIdt, iRows) ) {
-				int iFields = mysql_num_fields(pSQLRes);
+			for(int i = 1; i < iRow + 1; i++) {
 				LogManager::GetLogManager()->Log(
 						LOG_STAT,
 						"DBManager::SendLetter( "
 						"tid : %d, "
-						"iRows : %d, "
-						"iFields : %d "
+						"manid : %s, "
+						"manname : %s, "
+						"paidAmount : %s, "
+						"login_time : %s, "
+						"sent : %s "
 						")",
 						(int)syscall(SYS_gettid),
-						iRows,
-						iFields
+						result[i * iColumn],
+						result[i * iColumn + 1],
+						result[i * iColumn + 2],
+						result[i * iColumn + 3],
+						result[i * iColumn + 4]
 						);
 
-				if (iFields > 0) {
-					MYSQL_FIELD* fields;
-					MYSQL_ROW row;
-					fields = mysql_fetch_fields(pSQLRes);
+				Man man;
+				if( result[i * iColumn] != NULL ) {
+					man.manId = result[i * iColumn];
+				}
 
-					for (int i = 0; i < iRows; i++) {
-						if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
-							break;
-						}
+				if( result[i * iColumn + 1] != NULL ) {
+					man.manName = result[i * iColumn + 1];
+				}
 
-						Man man;
-						man.mManId = row[0];
-						man.mManName = row[1];
-						man.mPaidAmount = atoi(row[2]);
+				if( result[i * iColumn + 2] != NULL ) {
+					man.paidAmount = atof(result[i * iColumn + 2]);
+				}
 
-						/**
-						 * 检查男士是否允许接收
-						 */
-						if( CanRecvLetter(lady, man) ) {
-							bFlag = SendLetter(lady, regulation, templateCode, man);
-							bSend = true;
-							break;
-						}
-
-						usleep(10 * 1000);
-					}
+				/**
+				 * 检查男士是否允许接收
+				 */
+				if( CanRecvLetter(lady, man) ) {
+					bFlag = SendLetter2Man(lady, regulation, admireTemplate, man);
+					bSend = true;
+					break;
 				}
 			}
-			mDBSpool.ReleaseConnection(shIdt);
-		}
 
+		}
+		FinishQuery(result);
 	}
 
 	iHandleTime =  GetTickCount() - iHandleTime;
@@ -1498,14 +1278,149 @@ bool DBManager::SendLetter(
 	return bFlag;
 }
 
+bool DBManager::FinishLetter(const Lady& lady) {
+	int recordId = lady.mRecordId;
+	const string womanId = lady.mWomanId;
+	const string agentId = lady.mAgentId;
+	int siteId = lady.mSiteId;
 
-bool DBManager::SendLetter(
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::FinishLetter( "
+			"tid : %d, "
+			"recordId : %d, "
+			"womanId : %s, "
+			"agentId : %s, "
+			"start "
+			")",
+			(int)syscall(SYS_gettid),
+			recordId,
+			womanId.c_str(),
+			agentId.c_str()
+			);
+
+	unsigned int iHandleTime = GetTickCount();
+
+	bool bFlag = false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	int iIndex = GetIndexBySiteId(siteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	/**
+	 * 更新启动意向信助手发送队列表
+	 */
+	if( bFlag ) {
+		bFlag = false;
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::FinishLetter( "
+				"tid : %d, "
+				"[更新启动意向信助手发送队列表] "
+				")",
+				(int)syscall(SYS_gettid)
+				);
+
+		snprintf(sql, MAXSQLSIZE - 1,
+				"UPDATE admire_assistant_send "
+				"SET status = 2 "
+				"WHERE id = %d "
+				";",
+				recordId
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::FinishLetter( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if ( SQL_TYPE_UPDATE == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::FinishLetter( "
+					"tid : %d, "
+					"iRow : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow
+					);
+
+			if( iRow > 0 ) {
+				bFlag = true;
+			}
+		}
+	}
+
+	iHandleTime =  GetTickCount() - iHandleTime;
+
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::FinishLetter( "
+			"tid : %d, "
+			"bFlag : %s, "
+			"iHandleTime : %u ms, "
+			"end "
+			")",
+			(int)syscall(SYS_gettid),
+			bFlag?"true":"false",
+			iHandleTime
+			);
+
+	return bFlag;
+}
+
+void DBManager::HandleSyncDatabase() {
+	int i = 1;
+	while( true ) {
+		mSyncMutex.lock();
+		if( mbSyncForce ) {
+			mbSyncForce = false;
+			mSyncMutex.unlock();
+
+			// 同步男士
+			SyncManFromDatabase();
+
+		} else {
+			mSyncMutex.unlock();
+
+			if( mDbMan.miSyncTime > 0 ) {
+				if( i % mDbMan.miSyncTime == 0 ) {
+					// 同步男士
+					SyncManFromDatabase();
+				}
+
+				if( (i > mDbMan.miSyncTime) ) {
+					i = 1;
+				}
+			} else {
+				i = 1;
+			}
+		}
+
+		i++;
+		sleep(1);
+	}
+}
+
+bool DBManager::SendLetter2Man(
 		const Lady& lady,
 		const string& regulation,
-		const string& templateCode,
+		const AdmireTemplate& admireTemplate,
 		const Man& man
 		) {
-
+	int recordId = lady.mRecordId;
 	const string womanId = lady.mWomanId;
 	const string womanName = lady.mWomanName;
 	const string agentId = lady.mAgentId;
@@ -1516,21 +1431,23 @@ bool DBManager::SendLetter(
 	const string computerId = lady.mComputerId;
 	int siteId = lady.mSiteId;
 
-	const string manId = man.mManId;
-	const string manName = man.mManName;
+	const string manId = man.manId;
+	const string manName = man.manName;
 
 	LogManager::GetLogManager()->Log(
 			LOG_MSG,
-			"DBManager::SendLetter( "
+			"DBManager::SendLetter2Man( "
 			"tid : %d, "
+			"recordId : %d, "
 			"womanId : %s, "
-			"templateCode : %s "
+			"templateCode : %s, "
 			"manId : %s, "
 			"start "
 			")",
 			(int)syscall(SYS_gettid),
+			recordId,
 			womanId.c_str(),
-			templateCode.c_str(),
+			admireTemplate.templateCode.c_str(),
 			manId.c_str()
 			);
 
@@ -1539,18 +1456,17 @@ bool DBManager::SendLetter(
 	bool bFlag = false;
 
 	// 附件
-	list<string> attachmentList;
 	string attachmentListText;
 
 	// 写从表用的参数
 	string body = "";
 
 	RESDataList res;
-	MYSQL_RES* pSQLRes = NULL;
-	short shIdt = 0;
-	int iRows = 0;
+//	MYSQL_RES* pSQLRes = NULL;
+//	short shIdt = 0;
+	int iRow = 0;
 	unsigned long long iInsertId = 0;
-	char sql[MAXSQLSIZE] = {'\0'};
+	char sql[MAXBIGSQLSIZE] = {'\0'};
 
 	int iIndex = GetIndexBySiteId(siteId);
 	if( iIndex != INVALID_INDEX ) {
@@ -1561,115 +1477,48 @@ bool DBManager::SendLetter(
 	 * 获取附件和模板
 	 */
 	if( bFlag ) {
-		bFlag = false;
+		for(list<string>::const_iterator itr = admireTemplate.attachmentList.begin();
+				itr != admireTemplate.attachmentList.end();
+				itr++
+				) {
+    		attachmentListText += *itr;
+    		attachmentListText += ".jpg|";
+		}
+
+	    if( attachmentListText.length() > 0 ) {
+	    	attachmentListText = attachmentListText.substr(0, attachmentListText.length() - 1);
+	    }
+
+	    // 生成从表参数
+		string greet = "<p align=\"left\">";
+		greet += admireTemplate.at_greet;
+		greet += "&nbsp;";
+		greet += manName;
+		greet += ",</p><br/>";
+
+		string line = "<br/><br/><p align=\"center\" style=\"color:#666;width:100%;background:#f1f1f1;padding:2px 0;\">Original Text Written by the Lady</p><br/><br/><p align='left'>";
+		line += admireTemplate.at_greet;
+		line += "'&nbsp;'";
+		line += manName;
+		line += ",</p><br />";
+
+		body = greet + admireTemplate.at_content_en;
+		body += (admireTemplate.at_show_cn == "Y" && admireTemplate.at_content_cn.length() > 0)?admireTemplate.at_content_cn:"";
 
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
-				"[获取附件和模板] "
-				")",
-				(int)syscall(SYS_gettid)
-				);
-
-		snprintf(sql, MAXSQLSIZE - 1,
-				"SELECT attachment, at_greet, at_content_en, at_show_cn, at_content_cn "
-				"FROM admire_template "
-				"WHERE owner = '%s' "
-				"AND womanid = '%s' "
-				"AND template_type = 'A' "
-				"AND at_status = 'A' "
-				"AND at_id = %s "
-				"LIMIT 1 "
-				";",
-				agentId.c_str(),
-				womanId.c_str(),
-				templateCode.c_str()
-		);
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"DBManager::SendLetter( "
-				"tid : %d, "
-				"sql : %s "
+				"[获取附件和模板], "
+				"templateType : %s, "
+				"vg_id : %s, "
+				"attachmentListText : %s"
 				")",
 				(int)syscall(SYS_gettid),
-				sql
+				admireTemplate.templateType.c_str(),
+				admireTemplate.vg_id.c_str(),
+				attachmentListText.c_str()
 				);
-		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRows) ) {
-			int iFields = mysql_num_fields(pSQLRes);
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"DBManager::SendLetter( "
-					"tid : %d, "
-					"iRows : %d, "
-					"iFields : %d "
-					")",
-					(int)syscall(SYS_gettid),
-					iRows,
-					iFields
-					);
-			if (iFields > 0) {
-				MYSQL_FIELD* fields;
-				MYSQL_ROW row;
-				fields = mysql_fetch_fields(pSQLRes);
-
-				for (int i = 0; i < iRows; i++) {
-					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
-						break;
-					}
-
-					bFlag = true;
-
-					// 分割附件
-					attachmentListText = "";
-					string attachments = row[0];
-					attachments += "|";
-
-					string attachment;
-				    int index = 0;
-				    string::size_type pos;
-				    pos = attachments.find("|", index);
-				    while( pos != string::npos ) {
-				    	attachment = attachments.substr(index, pos - index);
-				    	if( attachment.length() > 0 ) {
-				    		attachmentList.push_back(attachment);
-
-				    		attachmentListText += attachment;
-				    		attachmentListText += ".jpg|";
-				    	}
-
-				    	index = pos + 1;
-						pos = attachments.find(",", index);
-				    }
-
-				    if( attachmentListText.length() > 0 ) {
-				    	attachmentListText = attachmentListText.substr(0, attachmentListText.length() - 1);
-				    }
-
-				    // 生成从表参数
-					string greet = "<p align=\"left\">";
-					greet += row[1];
-					greet += "&nbsp;";
-					greet += manName;
-					greet += ",</p><br/>";
-
-					string line = "<br/><br/><p align=\"center\" style=\"color:#666;width:100%;background:#f1f1f1;padding:2px 0;\">Original Text Written by the Lady</p><br/><br/><p align='left'>";
-					line += row[1];
-					line += "'&nbsp;'";
-					line += manName;
-					line += ",</p><br />";
-
-					string at_content_en = row[2];
-					string at_show_cn = row[3];
-					string at_content_cn = row[4];
-
-					body = greet + at_content_en;
-					body += (at_show_cn == "Y" && at_content_cn.length() > 0)?at_content_cn:"";
-
-				}
-			}
-		}
-		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
 	}
 
 	/**
@@ -1680,47 +1529,65 @@ bool DBManager::SendLetter(
 
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"[写入过渡表] "
 				")",
 				(int)syscall(SYS_gettid)
 				);
 
-		snprintf(sql, MAXSQLSIZE - 1,
+		snprintf(sql, MAXBIGSQLSIZE - 1,
 				"INSERT INTO admire_temp "
 				"SET "
 				"womanid = '%s', "
 				"manid = '%s', "
 				"adddate = NOW(), "
-				"agent = '%s' "
+				"agent = '%s', "
+				"template_type = '%s', "
+				"vg_id = '%s' "
 				";",
 				womanId.c_str(),
 				manId.c_str(),
-				agentId.c_str()
+				agentId.c_str(),
+				admireTemplate.templateType.c_str(),
+				admireTemplate.vg_id.c_str()
 		);
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				sql
 				);
-		if ( SQL_TYPE_INSERT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows, &iInsertId) ) {
+		if ( SQL_TYPE_INSERT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRow, &iInsertId) ) {
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
-					"DBManager::SendLetter( "
+					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"iRows : %d "
+					"iRow : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows
+					iRow
 					);
-			if( iRows > 0 && iInsertId != 0 ) {
+			if( iRow > 0 && iInsertId != 0 ) {
 				bFlag = true;
 			}
+		}
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SendLetter2Man( "
+					"tid : %d, "
+					"[写入过渡表] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
 		}
 	}
 
@@ -1730,14 +1597,14 @@ bool DBManager::SendLetter(
 
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"[写入主表] "
 				")",
 				(int)syscall(SYS_gettid)
 				);
 
-		snprintf(sql, MAXSQLSIZE - 1,
+		snprintf(sql, MAXBIGSQLSIZE - 1,
 				"INSERT INTO ammsg01_1m "
 				"SET "
 				"id = %llu, "
@@ -1766,38 +1633,52 @@ bool DBManager::SendLetter(
 				";",
 				iInsertId,
 				womanId.c_str(),
-				womanName.c_str(),
-				templateCode.c_str(),
+				SqlTransfer(womanName).c_str(),
+				admireTemplate.templateCode.c_str(),
 				manId.c_str(),
-				manName.c_str(),
+				SqlTransfer(manName).c_str(),
 				agentId.c_str(),
 				agentStaff.c_str(),
-				(int)attachmentList.size(),
+				(int)admireTemplate.attachmentList.size(),
 				groupId.c_str(),
 				regulation.c_str()
 		);
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				sql
 				);
-		if ( SQL_TYPE_INSERT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
+		if ( SQL_TYPE_INSERT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRow) ) {
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
-					"DBManager::SendLetter( "
+					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"iRows : %d "
+					"iRow : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows
+					iRow
 					);
-			if( iRows > 0 ) {
+			if( iRow > 0 ) {
 				bFlag = true;
 			}
+		}
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SendLetter2Man( "
+					"tid : %d, "
+					"[写入主表] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
 		}
 	}
 
@@ -1807,7 +1688,7 @@ bool DBManager::SendLetter(
 
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"[写入从表] "
 				")",
@@ -1824,7 +1705,7 @@ bool DBManager::SendLetter(
 		review_history += agentStaff;
 		review_history += "]";
 
-		snprintf(sql, MAXSQLSIZE - 1,
+		snprintf(sql, MAXBIGSQLSIZE - 1,
 				"INSERT INTO ammsg02_1m "
 				"SET "
 				"id = %llu, "
@@ -1838,8 +1719,8 @@ bool DBManager::SendLetter(
 				"attachment = '%s' "
 				";",
 				iInsertId,
-				body.c_str(),
-				review_history.c_str(),
+				SqlTransfer(body).c_str(),
+				SqlTransfer(review_history).c_str(),
 				ip.c_str(),
 				computerId.c_str(),
 				attachmentListText.c_str()
@@ -1847,7 +1728,7 @@ bool DBManager::SendLetter(
 
 //		LogManager::GetLogManager()->Log(
 //				LOG_STAT,
-//				"DBManager::SendLetter( "
+//				"DBManager::SendLetter2Man( "
 //				"tid : %d, "
 //				"sql : %s "
 //				")",
@@ -1855,19 +1736,33 @@ bool DBManager::SendLetter(
 //				sql
 //				);
 
-		if ( SQL_TYPE_INSERT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
+		if ( SQL_TYPE_INSERT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRow) ) {
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
-					"DBManager::SendLetter( "
+					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"iRows : %d "
+					"iRow : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows
+					iRow
 					);
-			if( iRows > 0 ) {
+			if( iRow > 0 ) {
 				bFlag = true;
 			}
+		}
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SendLetter2Man( "
+					"tid : %d, "
+					"[写入从表] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
 		}
 	}
 
@@ -1879,14 +1774,14 @@ bool DBManager::SendLetter(
 
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"[更新机构意向信当日限量余数] "
 				")",
 				(int)syscall(SYS_gettid)
 				);
 
-		snprintf(sql, MAXSQLSIZE - 1,
+		snprintf(sql, MAXBIGSQLSIZE - 1,
 				"UPDATE agent "
 				"SET admire_sum_balance = admire_sum_balance - 1 "
 				"WHERE agentid = '%s' "
@@ -1895,26 +1790,40 @@ bool DBManager::SendLetter(
 		);
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				sql
 				);
-		if ( SQL_TYPE_UPDATE == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
+		if ( SQL_TYPE_UPDATE == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRow) ) {
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
-					"DBManager::SendLetter( "
+					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"iRows : %d "
+					"iRow : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows
+					iRow
 					);
-			if( iRows > 0 ) {
+			if( iRow > 0 ) {
 				bFlag = true;
 			}
+		}
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SendLetter2Man( "
+					"tid : %d, "
+					"[更新机构意向信当日限量余数] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
 		}
 	}
 
@@ -1925,14 +1834,14 @@ bool DBManager::SendLetter(
 
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"[更新男士会员当日意向信提交数量] "
 				")",
 				(int)syscall(SYS_gettid)
 				);
 
-		snprintf(sql, MAXSQLSIZE - 1,
+		snprintf(sql, MAXBIGSQLSIZE - 1,
 				"UPDATE stats_admire_%s "
 				"SET day1 = day1 + 1, "
 				"total = total + 1 "
@@ -1943,7 +1852,7 @@ bool DBManager::SendLetter(
 		);
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"sql : %s "
 				")",
@@ -1951,19 +1860,30 @@ bool DBManager::SendLetter(
 				sql
 				);
 
-		if ( SQL_TYPE_UPDATE == mDBSpool.ExecuteSQL(sql, &res, iRows)  ) {
+		if ( SQL_TYPE_UPDATE == mDBSpool.ExecuteSQL(sql, &res, iRow)  ) {
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
-					"DBManager::SendLetter( "
+					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"iRows : %d "
+					"iRow : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows
+					iRow
+					);
+		} else {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SendLetter2Man( "
+					"tid : %d, "
+					"[更新男士会员当日意向信提交数量] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
 					);
 		}
 	}
-
 
 	/**
 	 * 写入工作人员本月发意向信数量
@@ -1973,17 +1893,18 @@ bool DBManager::SendLetter(
 
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"[写入工作人员本月发意向信数量(更新)] "
 				")",
 				(int)syscall(SYS_gettid)
 				);
 
-		snprintf(sql, MAXSQLSIZE - 1,
+		snprintf(sql, MAXBIGSQLSIZE - 1,
 				"UPDATE admire_reply_rate "
 				"SET num_submit = num_submit + 1, "
-				"num_sent = num_sent + 1 "
+				"num_sent = num_sent + 1, "
+				"assistant_submit = assistant_submit + 1 "
 				"WHERE staff_id = '%s' "
 				"AND smonth = DATE_FORMAT(NOW(), \"%%Y-%%m-01\") "
 				"AND agent = '%s' "
@@ -1994,29 +1915,29 @@ bool DBManager::SendLetter(
 		);
 		LogManager::GetLogManager()->Log(
 				LOG_STAT,
-				"DBManager::SendLetter( "
+				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				sql
 				);
-		if ( SQL_TYPE_UPDATE == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
+		if ( SQL_TYPE_UPDATE == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRow) ) {
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
-					"DBManager::SendLetter( "
+					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"iRows : %d "
+					"iRow : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows
+					iRow
 					);
-			if( iRows > 0 ) {
+			if( iRow > 0 ) {
 				bFlag = true;
 			} else {
 				LogManager::GetLogManager()->Log(
 						LOG_STAT,
-						"DBManager::SendLetter( "
+						"DBManager::SendLetter2Man( "
 						"tid : %d, "
 						"[写入工作人员本月发意向信数量(插入)] "
 						")",
@@ -2031,6 +1952,7 @@ bool DBManager::SendLetter(
 						"staff_name = '%s', "
 						"num_submit = 1, "
 						"num_sent = 1, "
+						"assistant_submit = 1, "
 						"num_reply = 0 "
 						";",
 						agentId.c_str(),
@@ -2040,7 +1962,7 @@ bool DBManager::SendLetter(
 
 				LogManager::GetLogManager()->Log(
 						LOG_STAT,
-						"DBManager::SendLetter( "
+						"DBManager::SendLetter2Man( "
 						"tid : %d, "
 						"sql : %s "
 						")",
@@ -2048,21 +1970,35 @@ bool DBManager::SendLetter(
 						sql
 						);
 
-				if ( SQL_TYPE_INSERT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
+				if ( SQL_TYPE_INSERT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRow) ) {
 					LogManager::GetLogManager()->Log(
 							LOG_STAT,
-							"DBManager::SendLetter( "
+							"DBManager::SendLetter2Man( "
 							"tid : %d, "
-							"iRows : %d "
+							"iRow : %d "
 							")",
 							(int)syscall(SYS_gettid),
-							iRows
+							iRow
 							);
-					if( iRows > 0 ) {
+					if( iRow > 0 ) {
 						bFlag = true;
 					}
 				}
 			}
+		}
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SendLetter2Man( "
+					"tid : %d, "
+					"[写入工作人员本月发意向信数量] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
 		}
 	}
 
@@ -2071,11 +2007,82 @@ bool DBManager::SendLetter(
 	 */
 	UpdateFAV(lady, man);
 
+	/**
+	 * 更新启动意向信助手发送队
+	 */
+	if( bFlag ) {
+		bFlag = false;
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::SendLetter2Man( "
+				"tid : %d, "
+				"[更新启动意向信助手发送队列表] "
+				")",
+				(int)syscall(SYS_gettid)
+				);
+
+		snprintf(sql, MAXBIGSQLSIZE - 1,
+				"UPDATE admire_assistant_send "
+				"SET num_sent = num_sent + 1 "
+				"WHERE id = %d "
+				";",
+				recordId
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::SendLetter2Man( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if ( SQL_TYPE_UPDATE == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRow) ) {
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::SendLetter2Man( "
+					"tid : %d, "
+					"iRow : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow
+					);
+
+			if( iRow > 0 ) {
+				bFlag = true;
+			}
+		}
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SendLetter2Man( "
+					"tid : %d, "
+					"[更新启动意向信助手发送队列表] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		}
+	}
+
+	/**
+	 * 更新内存男士表已收信数量
+	 */
+	if( bFlag ) {
+		UpdateManSent(man, siteId);
+	}
+
 	iHandleTime =  GetTickCount() - iHandleTime;
 
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
-			"DBManager::SendLetter( "
+			LOG_STAT,
+			"DBManager::SendLetter2Man( "
 			"tid : %d, "
 			"bFlag : %s, "
 			"iHandleTime : %u ms, "
@@ -2097,10 +2104,10 @@ bool DBManager::UpdateFAV(const Lady& lady, const Man& man) {
 
 	const string womanId = lady.mWomanId;
 	int siteId = lady.mSiteId;
-	const string manId = man.mManId;
+	const string manId = man.manId;
 
 	RESDataList res;
-	int iRows = 0;
+	int iRow = 0;
 	char sql[MAXSQLSIZE] = {'\0'};
 
 	int iIndex = GetIndexBySiteId(siteId);
@@ -2139,17 +2146,29 @@ bool DBManager::UpdateFAV(const Lady& lady, const Man& man) {
 				(int)syscall(SYS_gettid),
 				sql
 				);
-		if ( SQL_TYPE_UPDATE == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRows) ) {
+		if ( SQL_TYPE_UPDATE == mDBSpoolLady[iIndex].ExecuteSQL(sql, &res, iRow) ) {
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
 					"DBManager::UpdateFAV( "
 					"tid : %d, "
-					"iRows : %d "
+					"iRow : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRows
+					iRow
 					);
 			bFlag = true;
+		}
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::UpdateFAV( "
+					"tid : %d, "
+					"[更新FAV表] "
+					"失败"
+					")",
+					(int)syscall(SYS_gettid)
+					);
 		}
 	}
 
@@ -2167,11 +2186,27 @@ int DBManager::GetIndexBySiteId(int siteId) {
 	return index;
 }
 
+/**
+ * 过滤特殊字符
+ * @param
+ */
+string DBManager::SqlTransfer(const string& sql) {
+	string result = "";
+
+	result = StringHandle::replace(sql, "'", "\\'");
+	result = StringHandle::replace(result, "%", "\\%");
+	result = StringHandle::replace(result, "_", "\\_");
+	result = StringHandle::replace(result, "\"", "\\\"");
+	result = StringHandle::replace(result, "\\", "\\\\");
+
+	return result;
+}
+
 string DBManager::GetLadyConditionString(const Lady& lady) {
 	string value = "";
 
 	if( lady.mAgeStart.length() > 0 && lady.mAgeStart != "0000" ) {
-		value += "info_basic.birthday >= '";
+		value += "birthday >= '";
 		value += lady.mAgeStart;
 		value += "-01-01' ";
 	}
@@ -2180,17 +2215,76 @@ string DBManager::GetLadyConditionString(const Lady& lady) {
 		if( value.length() > 0 ) {
 			value += "AND ";
 		}
-		value += "info_basic.birthday <= '";
+		value += "birthday <= '";
 		value += lady.mAgeEnd;
-		value += "-01-01' ";
+		value += "-12-31' ";
+	}
+
+	if( lady.mIsBirthday != 0 ) {
+		if( value.length() > 0 ) {
+			value += "AND ";
+		}
+
+		// 处理月
+		time_t stm=time(NULL);
+		struct tm tTime;
+		localtime_r(&stm,&tTime);
+
+	    char num[MAX_PATH];
+	    memset(num, 0, MAX_PATH);
+
+	    snprintf(num, MAX_PATH, "%d", tTime.tm_mon + 1);
+
+	    value += "MONTH(birthday) = ";
+		value += num;
+		value += " ";
+
+		// 处理日
+		switch(lady.mIsBirthday) {
+		case 1:	// today
+		case 2: // tomorrow
+		case 3: {
+			value += "AND ";
+
+			// day after tomorrow
+			snprintf(num, MAX_PATH, "%d", tTime.tm_mday + lady.mIsBirthday - 1);
+
+		    value += "DAY(birthday) >= ";
+			value += num;
+			value += " AND ";
+
+			snprintf(num, MAX_PATH, "%d", tTime.tm_mday + lady.mIsBirthday);
+
+		    value += "DAY(birthday) < ";
+			value += num;
+			value += " ";
+		}break;
+		case 4: {
+			value += "AND ";
+			// three days after today
+			snprintf(num, MAX_PATH, "%d", tTime.tm_mday);
+
+		    value += "DAY(birthday) >= ";
+			value += num;
+			value += " AND ";
+
+			snprintf(num, MAX_PATH, "%d", tTime.tm_mday + 3);
+
+		    value += "DAY(birthday) < ";
+			value += num;
+			value += " ";
+		}break;
+
+		}
+
 	}
 
 	if( lady.mManName.length() > 0 ) {
 		if( value.length() > 0 ) {
 			value += "AND ";
 		}
-		value += "info_basic.firstname like '%";
-		value += lady.mManName;
+		value += "firstname like '%";
+		value += SqlTransfer(lady.mManName);
 		value += "%' ";
 	}
 
@@ -2198,30 +2292,32 @@ string DBManager::GetLadyConditionString(const Lady& lady) {
 		if( value.length() > 0 ) {
 			value += "AND ";
 		}
-		value += "info_basic.country = '";
-		value += lady.mCountry;
-		value += "' ";
+		string country = StringHandle::replace(lady.mCountry, ",", "','");
+
+		value += "country IN ('";
+		value += country;
+		value += "') ";
 	}
 
 	if( lady.mMarry.length() > 0 && lady.mMarry != "0" ) {
 		if( value.length() > 0 ) {
 			value += "AND ";
 		}
-		value += "info_basic.marry = ";
+		value += "marry = ";
 		value += lady.mMarry;
 		value += " ";
 	} else {
 		if( value.length() > 0 ) {
 			value += "AND ";
 		}
-		value += "info_basic.marry != 5 ";
+		value += "marry != 5 ";
 	}
 
 	if( lady.mChildren.length() > 0 && lady.mChildren != "0" ) {
 		if( value.length() > 0 ) {
 			value += "AND ";
 		}
-		value += "info_basic.children = ";
+		value += "children = ";
 		value += lady.mChildren;
 		value += " ";
 	}
@@ -2230,7 +2326,7 @@ string DBManager::GetLadyConditionString(const Lady& lady) {
 		if( value.length() > 0 ) {
 			value += "AND ";
 		}
-		value += "info_basic.photo = ";
+		value += "photo = ";
 		value += lady.mPhoto;
 		value += " ";
 	}
@@ -2239,7 +2335,7 @@ string DBManager::GetLadyConditionString(const Lady& lady) {
 		if( value.length() > 0 ) {
 			value += "AND ";
 		}
-		value += "info_basic.ethnicity = ";
+		value += "ethnicity = ";
 		value += lady.mEthnicity;
 		value += " ";
 	}
@@ -2248,10 +2344,2243 @@ string DBManager::GetLadyConditionString(const Lady& lady) {
 		if( value.length() > 0 ) {
 			value += "AND ";
 		}
-		value += "info_basic.religion = ";
+		value += "religion = ";
 		value += lady.mReligion;
 		value += " ";
 	}
 
 	return value;
+}
+
+bool DBManager::CheckLadyCondition(const Man& man, const Lady& lady) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CheckLadyCondition( "
+			"tid : %d, "
+			"[检查女士自定义条件], "
+			"manId : %s, "
+			"womanId : %s, "
+			"agentId : %s, "
+			"siteId : %d, "
+			"start "
+			")",
+			(int)syscall(SYS_gettid),
+			man.manId.c_str(),
+			lady.mWomanId.c_str(),
+			lady.mAgentId.c_str(),
+			lady.mSiteId
+			);
+
+	bool bFlag = false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	int iIndex = GetIndexBySiteId(lady.mSiteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	/**
+	 * 检查女士自定义条件
+	 */
+	if( bFlag ) {
+		bFlag = false;
+
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(*) "
+				"FROM info_basic "
+				"WHERE manid = '%s' "
+				"AND %s"
+				";",
+				man.manId.c_str(),
+				GetLadyConditionString(lady).c_str()
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::CheckLadyCondition( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if ( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::CheckLadyCondition( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+
+					if( strcmp(row[0], "0") != 0 ) {
+						bFlag = true;
+					}
+				}
+			}
+		}
+		mDBSpool.ReleaseConnection(shIdt);
+
+	}
+
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_MSG,
+				"DBManager::CheckLadyCondition( "
+				"tid : %d, "
+				"[检查女士自定义条件] "
+				"失败, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+	}
+
+	return bFlag;
+}
+
+bool DBManager::CheckManInfo(const Man& man, const Lady& lady) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CheckManInfo( "
+			"tid : %d, "
+			"[检查男士信息] "
+			"manId : %s, "
+			"siteId : %d, "
+			"start "
+			")",
+			(int)syscall(SYS_gettid),
+			man.manId.c_str(),
+			lady.mSiteId
+			);
+
+	bool bFlag = false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	int iIndex = GetIndexBySiteId(lady.mSiteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	if( bFlag ) {
+		bFlag = false;
+
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(*) "
+				"FROM info_core "
+				"LEFT JOIN info_basic ON info_core.manid = info_basic.manid "
+				"LEFT JOIN info_desc ON info_core.manid = info_desc.manid "
+				"LEFT JOIN info_site_%s ON info_core.manid = info_site_%s.manid "
+				"LEFT JOIN stats_admire_%s ON info_core.manid = stats_admire_%s.manid "
+				"WHERE info_core.manid = '%s' "
+				"AND info_site_%s.permit = 'Y' "
+				"AND info_site_%s.sendadm != 0 "
+				"AND info_site_%s.sendadm2 != 0 "
+				// 最近注册(半年内注册),注册时间倒叙
+				"AND ( "
+				"info_basic.agt_valid_%s = 1 "
+				"AND stats_admire_%s.day1 < 6 "
+				") "
+				";",
+				mpDbLady[iIndex].mPostfix.c_str(),
+				mpDbLady[iIndex].mPostfix.c_str(),
+				mpDbLady[iIndex].mPostfix.c_str(),
+				mpDbLady[iIndex].mPostfix.c_str(),
+				man.manId.c_str(),
+				mpDbLady[iIndex].mPostfix.c_str(),
+				mpDbLady[iIndex].mPostfix.c_str(),
+				mpDbLady[iIndex].mPostfix.c_str(),
+				mpDbLady[iIndex].mPostfix.c_str(),
+				mpDbLady[iIndex].mPostfix.c_str()
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::CheckManInfo( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if ( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::CheckManInfo( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+
+					if( strcmp(row[0], "0") != 0 ) {
+						bFlag = true;
+					}
+				}
+			}
+		}
+		mDBSpool.ReleaseConnection(shIdt);
+
+	}
+
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_MSG,
+				"DBManager::CheckManInfo( "
+				"tid : %d, "
+				"[检查男士信息] "
+				"失败, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		UpdateManCanSend(man, iIndex, false);
+	}
+
+	return bFlag;
+}
+
+bool DBManager::CheckEMF(const Man& man, const Lady& lady) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CheckEMF( "
+			"tid : %d, "
+			"[3.检查是否有EMF通信关系或者女士是否给男士发过发过首封EMF, 检查男士是否发过BP信件给女士] "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	bool bFlag = false;
+	bool bUpdate = false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	int iIndex = GetIndexBySiteId(lady.mSiteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	if( bFlag ) {
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT mw_num, wm_reply_num, integral "
+				"FROM relation "
+				"WHERE womanid = '%s' "
+				"AND manid = '%s' "
+				";",
+				lady.mWomanId.c_str(),
+				man.manId.c_str()
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::CanRecvLetter( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::CheckEMF( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+
+					if( strcmp(row[0], "0") != 0 || strcmp(row[1], "0") != 0 ) {
+						// 检查是否有EMF通信关系或者女士是否给男士发过首封EMF
+						bUpdate = true;
+						bFlag = false;
+					} else if( strcmp(row[1], "0") != 0 ){
+						// 检查男士是否发过BP信件给女士
+						bFlag = false;
+					}
+				}
+			}
+		}
+		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::CheckEMF( "
+					"tid : %d, "
+					"[3.检查是否有EMF通信关系或者女士是否给男士发过发过首封EMF, 检查男士是否发过BP信件给女士] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		}
+
+		if( bUpdate ) {
+			UpdateFAV(lady, man);
+		}
+	}
+
+	return bFlag;
+}
+
+bool DBManager::CheckAdmire(const Man& man, const Lady& lady) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CheckAdmire( "
+			"tid : %d, "
+			"[5.同一机构多个女士在短时间內向男士提交过意向信] "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	int iAgentMaxnumin24hour = (man.paidAmount > 0)?5:100;
+
+	bool bFlag = false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	int iIndex = GetIndexBySiteId(lady.mSiteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	if( bFlag ) {
+		bFlag = false;
+
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(*) "
+				"FROM admire_temp "
+				"WHERE adddate >= DATE_SUB(NOW(), INTERVAL 1 DAY) "
+				"AND manid = '%s' "
+				"AND agent = '%s' "
+				";",
+				man.manId.c_str(),
+				lady.mAgentId.c_str()
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::CheckAdmire( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::CheckAdmire( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+
+					if( atoi(row[0]) < iAgentMaxnumin24hour ) {
+						bFlag = true;
+					}
+				}
+			}
+		}
+		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::CheckAdmire( "
+					"tid : %d, "
+					"[5.同一机构多个女士在短时间內向男士提交过意向信] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		}
+	}
+
+	return bFlag;
+}
+
+bool DBManager::CheckAdmire24Hour(const Man& man, const Lady& lady) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CheckAdmire24Hour( "
+			"tid : %d, "
+			"[5.1.检查该女士与该男士24小时内有没有提交过意向信] "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	bool bFlag = false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	int iIndex = GetIndexBySiteId(lady.mSiteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	if( bFlag ) {
+		bFlag = false;
+
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(*) "
+				"FROM admire_temp "
+				"WHERE adddate >= DATE_SUB(NOW(), INTERVAL 1 DAY) "
+				"AND manid = '%s' "
+				"AND womanid = '%s' "
+				";",
+				man.manId.c_str(),
+				lady.mWomanId.c_str()
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::CheckAdmire24Hour( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::CheckAdmire24Hour( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+
+					if( atoi(row[0]) == 0 ) {
+						bFlag = true;
+					}
+				}
+			}
+		}
+		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::CheckAdmire24Hour( "
+					"tid : %d, "
+					"[5.1.检查该女士与该男士24小时内有没有提交过意向信] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		}
+	}
+
+	return bFlag;
+}
+
+bool DBManager::CheckAdmireCount(const Man& man, const Lady& lady) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CheckAdmireCount( "
+			"tid : %d, "
+			"[6.男士当天收到多于manmaxnumoneday封意向信即禁发] "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	bool bFlag = false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	int iIndex = GetIndexBySiteId(lady.mSiteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	if( bFlag ) {
+		bFlag = false;
+
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(*) "
+				"FROM stats_admire_%s "
+				"WHERE manid = '%s' "
+				"AND sent >= 6 "
+				";",
+				mpDbLady[iIndex].mPostfix.c_str(),
+				man.manId.c_str()
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::CheckAdmireCount( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::CheckAdmireCount( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+
+					if( atoi(row[0]) == 0 ) {
+						bFlag = true;
+					}
+				}
+			}
+		}
+		mDBSpool.ReleaseConnection(shIdt);
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::CheckAdmireCount( "
+					"tid : %d, "
+					"[6.男士当天收到多于manmaxnumoneday封意向信即禁发] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+
+			UpdateManCanSend(man, iIndex, false);
+		}
+	}
+
+	return bFlag;
+}
+
+bool DBManager::CheckEMFCount(const Man& man) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CheckEMFCount( "
+			"tid : %d, "
+			"[8.男士在5天內EMF通信关系超过50对] "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	bool bFlag = false;
+
+	bool bPayMember = (man.paidAmount > 0)?true:false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	if( bPayMember ) {
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(*) "
+				"FROM hotmember "
+				"WHERE mbtype = 'm' "
+				"AND num > 50 "
+				"AND memberid = '%s' "
+				";",
+				man.manId.c_str()
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::CheckEMFCount( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::CheckEMFCount( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+
+					if( atoi(row[0]) == 0 ) {
+						bFlag = true;
+					}
+				}
+			}
+		}
+		mDBSpool.ReleaseConnection(shIdt);
+	} else {
+		bFlag = true;
+	}
+
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_MSG,
+				"DBManager::CheckEMFCount( "
+				"tid : %d, "
+				"[8.男士在5天內EMF通信关系超过50对] "
+				"失败, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		for(int i = 0; i < miDbCount; i++) {
+			UpdateManCanSend(man, mpDbLady[i].miSiteId, false);
+		}
+	}
+
+	return bFlag;
+}
+
+bool DBManager::CheckCupidNote(const Man& man, const Lady& lady) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CheckCupidNote( "
+			"tid : %d, "
+			"[10.检查是否男士发过CupidNote给女士] "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	bool bFlag = false;
+	bool bUpdate = false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	int iIndex = GetIndexBySiteId(lady.mSiteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	if( bFlag ) {
+		bFlag = false;
+
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(*) "
+				"FROM cupid1 "
+				"WHERE manid = '%s' "
+				"AND womanid = '%s' "
+				"AND agentid = '%s' "
+				"AND review IN('N','Y') "
+				";",
+				man.manId.c_str(),
+				lady.mWomanId.c_str(),
+				lady.mAgentId.c_str()
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::CheckCupidNote( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::CheckCupidNote( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+
+					if( atoi(row[0]) == 0 ) {
+						bFlag = true;
+						bUpdate = true;
+					}
+				}
+			}
+		}
+		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::CheckCupidNote( "
+					"tid : %d, "
+					"[10.检查是否男士发过CupidNote给女士] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		}
+
+		if( bUpdate ) {
+			UpdateFAV(lady, man);
+		}
+	}
+
+	return bFlag;
+}
+
+/**
+ * 11.检查是否发过意向信
+ */
+bool DBManager::CheckAdmireRecv(const Man& man, const Lady& lady) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CheckAdmireRecv( "
+			"tid : %d, "
+			"[11.检查是否发过意向信] "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	bool bFlag = false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	int iIndex = GetIndexBySiteId(lady.mSiteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	if( bFlag ) {
+		bFlag = false;
+
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(*) "
+				"FROM ammsg01_new "
+				"WHERE submit_date > DATE_SUB(NOW(), INTERVAL 1 MONTH) "
+				"AND manid = '%s' "
+				"AND womanid = '%s' "
+				"AND hideflag = 'N' "
+				";",
+				man.manId.c_str(),
+				lady.mWomanId.c_str()
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::CheckAdmireRecv( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if ( SQL_TYPE_SELECT == mDBSpoolLady[iIndex].ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::CheckAdmireRecv( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+
+					if( atoi(row[0]) == 0 ) {
+						bFlag = true;
+					}
+				}
+			}
+		}
+		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::CheckAdmireRecv( "
+					"tid : %d, "
+					"[11.检查是否发过意向信] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		}
+	}
+
+	return bFlag;
+}
+
+bool DBManager::SetAllLetterDelete()
+{
+	bool bResult = false;
+
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::SetAllLetterDelete( "
+			"tid : %d, "
+			"start "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	unsigned int iHandleTime = GetTickCount();
+
+	RESDataList res;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	/**
+	 * 设置所有意向信状态为删除
+	 */
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::SetAllLetterDelete( "
+			"tid : %d, "
+			"[设置所有意向信状态为删除] "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	snprintf(sql, MAXSQLSIZE - 1,
+			"UPDATE admire_assistant_send "
+			"SET status = 3 "
+			"WHERE status != 3"
+			";");
+
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::SetAllLetterDelete( "
+			"tid : %d, "
+			"sql : %s "
+			")",
+			(int)syscall(SYS_gettid),
+			sql
+			);
+
+	res.clear();
+	for(int iSite = 0; iSite < miDbCount; iSite++ ) {
+		if ( SQL_TYPE_UPDATE == mDBSpoolLady[iSite].ExecuteSQL(sql, &res, iRow) ) {
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::SetAllLetterDelete( "
+					"tid : %d, "
+					"[标记数据库女士发送记录为已经删除] "
+					"iSite : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iSite
+					);
+
+			bResult = true;
+		}
+	}
+
+	snprintf(sql, MAXSQLSIZE - 1,
+			"DELETE * "
+			"FROM man "
+			";"
+	);
+
+	// 清空内存表
+	if( bResult ) {
+		bResult = false;
+		char** result = NULL;
+		int iRow = 0;
+		int iColumn = 0;
+		bResult = QuerySQL(mdb, sql, &result, &iRow, &iColumn, NULL);
+		if( bResult && result ) {
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::SetAllLetterDelete( "
+					"tid : %d, "
+					"[清空内存表], "
+					"iRow : %d, "
+					"iColumn : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iColumn
+					);
+		}
+		FinishQuery(result);
+	}
+
+	iHandleTime =  GetTickCount() - iHandleTime;
+
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::SetAllLetterDelete( "
+			"tid : %d, "
+			"bResult : %s, "
+			"iHandleTime : %u ms, "
+			"end "
+			")",
+			(int)syscall(SYS_gettid),
+			bResult ? "true" : "false",
+			iHandleTime
+			);
+
+
+	return bResult;
+}
+
+void DBManager::SyncManFromDatabase() {
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::SyncManFromDatabase( "
+			"tid : %d, "
+			"[增量同步男士到内存表], "
+			"start "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	unsigned int iHandleTime = GetTickCount();
+
+	bool bFlag = false, bEnougth = false;
+
+	// 还原同步下标
+	for(int i = 0; i < miDbCount; i++) {
+		mpDbLady[i].miSyncIndex = 0;
+	}
+
+	while( !bEnougth ) {
+		// 从数据库同步男士(最近30天登录, 并且半年前注册)到内存表
+		// 同步4个站
+		bFlag = SyncManFromDatabaseLoginRecent();
+
+		// 判断内存表数据是否足够
+		bEnougth = CheckManCountEnougth();
+
+		if( !bFlag || bEnougth ) {
+			// 数据库没有数据可以同步, 或者内存表数据足够, 跳出
+			break;
+		}
+
+	}
+
+	while( !bEnougth ) {
+		// 从数据库同步男士(非最近30天登录, 并且半年内注册)到内存表
+		// 同步4个站
+		bFlag = SyncManFromDatabaseRegRecent();
+
+		// 判断内存表数据是否足够
+		bEnougth = CheckManCountEnougth();
+
+		if( !bFlag || bEnougth ) {
+			// 数据库没有数据可以同步, 或者内存表数据足够, 跳出
+			break;
+		}
+	}
+
+	iHandleTime = GetTickCount() - iHandleTime;
+
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::SyncManFromDatabase( "
+			"tid : %d, "
+			"bEnougth : %s, "
+			"iHandleTime : %u ms, "
+			"end "
+			")",
+			(int)syscall(SYS_gettid),
+			bEnougth?"true":"false",
+			iHandleTime
+			);
+}
+
+bool DBManager::SyncManFromDatabaseLoginRecent() {
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::SyncManFromDatabaseLoginRecent( "
+			"tid : %d, "
+			"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表], "
+			"start "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	bool bFlag = false;
+
+	unsigned int iHandleTime = GetTickCount();
+	char sql[MAXSQLSIZE] = {'\0'};
+	int iStartIndex;
+	int iNeedSync = 3000;
+	int iTotalSync = 0;
+
+	ExecSQL( mdb, "BEGIN;", NULL );
+	sqlite3_stmt* stmtMan;
+	snprintf(sql, MAXSQLSIZE - 1,
+			"REPLACE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`) "
+			"VALUES(?, ?, ?, ?, ?)"
+			);
+	sqlite3_prepare_v2(mdb, sql, strlen(sql), &stmtMan, 0);
+
+	for(int i = 0; i < miDbCount; i++) {
+		iStartIndex = mpDbLady[i].miSyncIndex;
+		iTotalSync = 0;
+
+		// 最近30天有登录过, 最后登录时间倒叙
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT manid, last_login "
+				"FROM stats_admire_%s "
+				"WHERE last_login >= DATE_SUB(NOW(), INTERVAL 1 MONTH) "
+				"ORDER BY last_login DESC "
+				"LIMIT %d, %d "
+				";",
+				mpDbLady[i].mPostfix.c_str(),
+				iStartIndex,
+				iNeedSync
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::SyncManFromDatabaseLoginRecent( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		unsigned int iHandleSiteTime = GetTickCount();
+
+		MYSQL_RES* pSQLRes = NULL;
+		short shIdt = 0;
+		int iRow = 0;
+		if ( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::SyncManFromDatabaseLoginRecent( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+
+			// 移动下标
+			mpDbLady[i].miSyncIndex += iRow;
+
+			if ( iFields > 0 ) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ( (row = mysql_fetch_row(pSQLRes)) == NULL ) {
+						break;
+					}
+
+					// 从数据库获取男士
+					Man man;
+					man.manId = row[0];
+					man.login_time = row[1];
+					man.paidAmount = atof(row[2]);
+
+					bool bInsert = false;
+
+					// 从数据库同步男士基本信息
+					bInsert = SyncManBasicInfo(man);
+					if( bInsert ) {
+						// 插入男士到内存表
+						bInsert = InsertManFromDataBase(stmtMan, man);
+					}
+
+					// 从数据库同步男士基本信息失败
+					if( !bInsert ) {
+						string value = "[";
+						for( int k = 0; k < iFields; k++ ) {
+							value += row[k];
+							value += ", ";
+						}
+						if( value.length() > 1 ) {
+							value = value.substr(0, value.length() - 2);
+						}
+						value += "]";
+						LogManager::GetLogManager()->Log(
+								LOG_WARNING,
+								"DBManager::SyncManFromDatabaseLoginRecent( "
+								"tid : %d, "
+								"[从数据库获取男士] "
+								"失败, "
+								"row : %d, "
+								"value : %s "
+								")",
+								(int)syscall(SYS_gettid),
+								i,
+								value.c_str()
+								);
+					} else {
+						iTotalSync++;
+					}
+				}
+
+			}
+
+			if( iNeedSync == iTotalSync ) {
+				// 只要其中一个分站够数据都标记为可以数量足够
+				bFlag = true;
+			}
+
+		} else {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SyncManFromDatabaseLoginRecent( "
+					"tid : %d, "
+					"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		}
+		mDBSpool.ReleaseConnection(shIdt);
+
+		iHandleSiteTime = GetTickCount() - iHandleSiteTime;
+
+		LogManager::GetLogManager()->Log(
+				LOG_MSG,
+				"DBManager::SyncManFromDatabaseLoginRecent( "
+				"tid : %d, "
+				"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表] "
+				"iHandleSiteTime : %u ms, "
+				"end "
+				")",
+				(int)syscall(SYS_gettid),
+				iHandleSiteTime
+				);
+
+		usleep(1000 * iHandleSiteTime);
+	}
+
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_WARNING,
+				"DBManager::SyncManFromDatabaseLoginRecent( "
+				"tid : %d, "
+				"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表] "
+				"没有更多数据 "
+				")",
+				(int)syscall(SYS_gettid)
+				);
+	}
+
+	sqlite3_finalize(stmtMan);
+	ExecSQL( mdb, "COMMIT;", NULL );
+
+	iHandleTime = GetTickCount() - iHandleTime;
+
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::SyncManFromDatabaseLoginRecent( "
+			"tid : %d, "
+			"bFlag : %s, "
+			"iHandleTime : %u ms, "
+			"end "
+			")",
+			(int)syscall(SYS_gettid),
+			bFlag?"true":"false",
+			iHandleTime
+			);
+
+	return bFlag;
+}
+
+bool DBManager::SyncManFromDatabaseRegRecent() {
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::SyncManFromDatabaseRegRecent( "
+			"tid : %d, "
+			"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表], "
+			"start "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	bool bFlag = false;
+
+	unsigned int iHandleTime = GetTickCount();
+	char sql[MAXSQLSIZE] = {'\0'};
+	int iStartIndex;
+	int iNeedSync = 3000;
+	int iTotalSync = 0;
+
+	ExecSQL( mdb, "BEGIN;", NULL );
+	sqlite3_stmt* stmtMan;
+	snprintf(sql, MAXSQLSIZE - 1,
+			"REPLACE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`) "
+			"VALUES(?, ?, ?, ?, ?)"
+			);
+	sqlite3_prepare_v2(mdb, sql, strlen(sql), &stmtMan, 0);
+
+	for(int i = 0; i < miDbCount; i++) {
+		iStartIndex = mpDbLady[i].miSyncIndex;
+		iTotalSync = 0;
+
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT manid, last_login "
+				"FROM stats_admire_%s "
+				"WHERE last_login < DATE_SUB(NOW(), INTERVAL 1 MONTH) "
+				"ORDER BY last_login DESC "
+				"LIMIT %d, %d "
+				";",
+				mpDbLady[i].mPostfix.c_str(),
+				iStartIndex,
+				iNeedSync
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::SyncManFromDatabaseRegRecent( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		unsigned int iHandleSiteTime = GetTickCount();
+
+		MYSQL_RES* pSQLRes = NULL;
+		short shIdt = 0;
+		int iRow = 0;
+		if ( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::SyncManFromDatabaseRegRecent( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+
+			// 移动下标
+			mpDbLady[i].miSyncIndex += iRow;
+
+			if ( iFields > 0 ) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ( (row = mysql_fetch_row(pSQLRes)) == NULL ) {
+						break;
+					}
+
+					// 从数据库获取男士
+					Man man;
+					man.manId = row[0];
+					man.login_time = row[1];
+					man.paidAmount = atof(row[2]);
+
+					bool bInsert = false;
+
+					// 最近注册
+					if( CheckManRegRecent(man) ) {
+						// 从数据库同步男士基本信息
+						bInsert = SyncManBasicInfo(man);
+						if( bInsert ) {
+							// 插入男士到内存表
+							bInsert = InsertManFromDataBase(stmtMan, man);
+						}
+					}
+
+					// 从数据库同步男士基本信息失败
+					if( !bInsert ) {
+						string value = "[";
+						for( int k = 0; k < iFields; k++ ) {
+							value += row[k];
+							value += ", ";
+						}
+						if( value.length() > 1 ) {
+							value = value.substr(0, value.length() - 2);
+						}
+						value += "]";
+						LogManager::GetLogManager()->Log(
+								LOG_WARNING,
+								"DBManager::SyncManFromDatabaseRegRecent( "
+								"tid : %d, "
+								"[从数据库获取男士] "
+								"失败, "
+								"row : %d, "
+								"value : %s "
+								")",
+								(int)syscall(SYS_gettid),
+								i,
+								value.c_str()
+								);
+					} else {
+						iTotalSync++;
+					}
+				}
+
+			}
+
+			if( iNeedSync == iTotalSync ) {
+				// 只要其中一个分站够数据都标记为可以数量足够
+				bFlag = true;
+			}
+
+		} else {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SyncManFromDatabaseRegRecent( "
+					"tid : %d, "
+					"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表] "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		}
+		mDBSpool.ReleaseConnection(shIdt);
+
+		iHandleSiteTime = GetTickCount() - iHandleSiteTime;
+
+		LogManager::GetLogManager()->Log(
+				LOG_MSG,
+				"DBManager::SyncManFromDatabaseRegRecent( "
+				"tid : %d, "
+				"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表] "
+				"iHandleSiteTime : %u ms, "
+				"end "
+				")",
+				(int)syscall(SYS_gettid),
+				iHandleSiteTime
+				);
+
+		usleep(1000 * iHandleSiteTime);
+	}
+
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_WARNING,
+				"DBManager::SyncManFromDatabaseRegRecent( "
+				"tid : %d, "
+				"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表] "
+				"没有更多数据 "
+				")",
+				(int)syscall(SYS_gettid)
+				);
+	}
+
+	sqlite3_finalize(stmtMan);
+	ExecSQL( mdb, "COMMIT;", NULL );
+
+	iHandleTime = GetTickCount() - iHandleTime;
+
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::SyncManFromDatabaseRegRecent( "
+			"tid : %d, "
+			"bFlag : %s, "
+			"iHandleTime : %u ms, "
+			"end "
+			")",
+			(int)syscall(SYS_gettid),
+			bFlag?"true":"false",
+			iHandleTime
+			);
+
+	return bFlag;
+}
+
+bool DBManager::CheckManRegRecent(const Man& man) {
+	bool bFlag = false;
+
+	unsigned int iHandleTime = GetTickCount();
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	snprintf(sql, MAXSQLSIZE - 1,
+			"SELECT count(*) "
+			"FROM info_basic, info_core "
+			"WHERE info_basic.manid = info_core.manid "
+			"AND info_basic.manid = '%s' "
+			"AND info_basic.submitdate >= DATE_SUB(NOW(), INTERVAL 6 MONTH)"
+			";",
+			man.manId.c_str()
+	);
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	if ( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+		int iFields = mysql_num_fields(pSQLRes);
+		if ( iFields > 0 ) {
+			MYSQL_FIELD* fields;
+			MYSQL_ROW row;
+			fields = mysql_fetch_fields(pSQLRes);
+
+			for (int i = 0; i < iRow; i++) {
+				if ( (row = mysql_fetch_row(pSQLRes)) == NULL ) {
+					break;
+				}
+
+				if( atoi(row[0]) > 0 ) {
+					bFlag = true;
+				}
+			}
+		}
+	} else {
+		LogManager::GetLogManager()->Log(
+				LOG_WARNING,
+				"DBManager::CheckManRegRecent( "
+				"tid : %d, "
+				"[检查男士是否最近注册] "
+				"失败, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+	}
+	mDBSpool.ReleaseConnection(shIdt);
+
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CheckManRegRecent( "
+			"tid : %d, "
+			"[检查男士是否最近注册] "
+			"bFlag : %s "
+			")",
+			(int)syscall(SYS_gettid),
+			bFlag?"true":"false"
+			);
+
+	iHandleTime = GetTickCount() - iHandleTime;
+
+	return bFlag;
+}
+
+bool DBManager::SyncManBasicInfo(Man& man) {
+	bool bFlag = false;
+
+	unsigned int iHandleTime = GetTickCount();
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	snprintf(sql, MAXSQLSIZE - 1,
+			"SELECT info_basic.firstname, info_basic.submitdate, info_core.paid_amount "
+			"FROM info_basic, info_core "
+			"WHERE info_basic.manid = info_core.manid "
+			"AND info_basic.manid = '%s' "
+			";",
+			man.manId.c_str()
+	);
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	if ( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+		int iFields = mysql_num_fields(pSQLRes);
+		if ( iFields > 0 ) {
+			MYSQL_FIELD* fields;
+			MYSQL_ROW row;
+			fields = mysql_fetch_fields(pSQLRes);
+
+			for (int i = 0; i < iRow; i++) {
+				if ( (row = mysql_fetch_row(pSQLRes)) == NULL ) {
+					break;
+				}
+
+				bFlag = true;
+
+				man.manName = row[0];
+				man.reg_time = row[1];
+				man.paidAmount = atof(row[2]);
+			}
+		}
+	}
+	mDBSpool.ReleaseConnection(shIdt);
+
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_MSG,
+				"DBManager::SyncManBasicInfo( "
+				"tid : %d, "
+				"[从数据库同步男士基本信息] "
+				"失败, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+	}
+
+	iHandleTime = GetTickCount() - iHandleTime;
+
+	return bFlag;
+}
+
+bool DBManager::CheckManCountEnougth() {
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::CheckManCountEnougth( "
+			"tid : %d, "
+			"[查询内存表男士是否足够], "
+			"start "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	bool bFlag = false;
+
+	char sql[MAXSQLSIZE] = {'\0'};
+	int iTotal = 0;
+
+	// cant_sent
+	string can_sent = "";
+	string sep = " OR ";
+	for(int i = 0; i < miDbCount; i++) {
+		can_sent += "can_sent_";
+		can_sent += mpDbLady[i].mPostfix;
+		can_sent += " = 1";
+		can_sent += sep;
+	}
+
+	if( can_sent.length() > 0 ) {
+		can_sent = can_sent.substr(0, can_sent.length() - sep.length());
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(*) "
+				"FROM man "
+				"WHERE %s"
+				";",
+				can_sent.c_str()
+				);
+	} else {
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(*) "
+				"FROM man "
+				";"
+				);
+	}
+
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CheckManCountEnougth( "
+			"tid : %d, "
+			"sql : %s "
+			")",
+			(int)syscall(SYS_gettid),
+			sql
+			);
+
+	bool bResult = false;
+	char** result = NULL;
+	int iRow = 0;
+	int iColumn = 0;
+
+	bResult = QuerySQL(mdb, sql, &result, &iRow, &iColumn, NULL);
+	if( bResult && result ) {
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::CheckManCountEnougth( "
+				"tid : %d, "
+				"iRow : %d, "
+				"iColumn : %d "
+				")",
+				(int)syscall(SYS_gettid),
+				iRow,
+				iColumn
+				);
+
+		if( iRow > 0 ) {
+			iTotal = atoi(result[1 * iColumn]);
+		}
+	}
+	FinishQuery(result);
+
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::CheckManCountEnougth( "
+			"tid : %d, "
+			"bFlag : %s, "
+			"iTotal : %d, "
+			"end "
+			")",
+			(int)syscall(SYS_gettid),
+			bFlag?"true":"false",
+			iTotal
+			);
+
+	return bFlag;
+}
+
+bool DBManager::CreateTable(sqlite3 *db) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CreateTable( "
+			"tid : %d, "
+			"[创建内存表], "
+			"start "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	bool bFlag = false;
+
+	char sql[MAXSQLSIZE] = {'\0'};
+	char *msg = NULL;
+
+	string site = "";
+
+	// sent
+	for(int i = 0; i < miDbCount; i++) {
+		site += "sent_";
+		site += mpDbLady[i].mPostfix;
+		site += " TINYINT DEFAULT 0,";
+	}
+
+	// cant_sent
+	for(int i = 0; i < miDbCount; i++) {
+		site += "can_sent_";
+		site += mpDbLady[i].mPostfix;
+		site += " TINYINT DEFAULT 1,";
+	}
+	if( site.length() > 0 ) {
+		site = site.substr(0, site.length() - 1);
+	}
+
+	// 建男士表
+	snprintf(sql, MAXSQLSIZE - 1,
+			"CREATE TABLE man( "
+						"ID INTEGER PRIMARY KEY AUTOINCREMENT, "
+						"manid TEXT, "
+						"manname TEXT, "
+						"login_time TEXT, "
+						"reg_time TEXT, "
+						"paid_amount DECIMAL, "
+						"%s "
+						");",
+						site.c_str()
+	);
+
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CreateTable( "
+			"tid : %d, "
+			"sql : %s "
+			")",
+			(int)syscall(SYS_gettid),
+			sql
+			);
+
+	bFlag = ExecSQL( db, sql, &msg );
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_ERR_USER,
+				"DBManager::CreateTable( "
+				"tid : %d, "
+				"Could not create table man, msg : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql,
+				msg
+				);
+		if( msg != NULL) {
+			sqlite3_free(msg);
+			msg = NULL;
+		}
+
+		return false;
+	}
+
+	// 建男士表索引(manid)
+	snprintf(sql, MAXSQLSIZE - 1,
+			"CREATE UNIQUE INDEX man_index_manid "
+			"ON man (manid)"
+			";"
+	);
+
+	bFlag = ExecSQL( db, sql, &msg );
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_ERR_USER,
+				"DBManager::CreateTable( "
+				"tid : %d, "
+				"sql : %s, "
+				"Could not create index man_index_manid, msg : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql,
+				msg
+				);
+		if( msg != NULL) {
+			sqlite3_free(msg);
+			msg = NULL;
+		}
+		return false;
+	}
+
+	// 建男士表索引(last_login)
+	snprintf(sql, MAXSQLSIZE - 1,
+			"CREATE INDEX man_index_login_time "
+			"ON man (login_time)"
+			";"
+	);
+
+	bFlag = ExecSQL( db, sql, &msg );
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_ERR_USER,
+				"DBManager::CreateTable( "
+				"tid : %d, "
+				"sql : %s, "
+				"Could not create index man_index_login_time, msg : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql,
+				msg
+				);
+		if( msg != NULL) {
+			sqlite3_free(msg);
+			msg = NULL;
+		}
+		return false;
+	}
+
+	// 建男士表索引(reg_time)
+	snprintf(sql, MAXSQLSIZE - 1,
+			"CREATE INDEX man_index_reg_time "
+			"ON man (reg_time)"
+			";"
+	);
+
+	bFlag = ExecSQL( db, sql, &msg );
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_ERR_USER,
+				"DBManager::CreateTable( "
+				"tid : %d, "
+				"sql : %s, "
+				"Could not create index man_index_reg_time, msg : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql,
+				msg
+				);
+		if( msg != NULL) {
+			sqlite3_free(msg);
+			msg = NULL;
+		}
+		return false;
+	}
+
+	return true;
+}
+
+bool DBManager::InsertManFromDataBase(sqlite3_stmt* stmtMan, const Man &man) {
+//	LogManager::GetLogManager()->Log(
+//			LOG_STAT,
+//			"DBManager::InsertManFromDataBase( "
+//			"tid : %d, "
+//			"[插入男士到内存表], "
+//			"start "
+//			")",
+//			(int)syscall(SYS_gettid)
+//			);
+
+	bool bFlag = true;
+
+	sqlite3_reset(stmtMan);
+
+	// manid
+	sqlite3_bind_text(stmtMan, 1, man.manId.c_str(), man.manId.length(), NULL);
+
+	// manname
+	sqlite3_bind_text(stmtMan, 2, man.manName.c_str(), man.manName.length(), NULL);
+
+	// login_time
+	sqlite3_bind_text(stmtMan, 3, man.login_time.c_str(), man.login_time.length(), NULL);
+
+	// reg_time
+	sqlite3_bind_text(stmtMan, 4, man.reg_time.c_str(), man.reg_time.length(), NULL);
+
+	// paid_amount
+	sqlite3_bind_double(stmtMan, 5, man.paidAmount);
+
+	sqlite3_step(stmtMan);
+
+//	LogManager::GetLogManager()->Log(
+//			LOG_STAT,
+//			"DBManager::InsertManFromDataBase( "
+//			"tid : %d, "
+//			"bFlag : %s, "
+//			"end "
+//			")",
+//			(int)syscall(SYS_gettid),
+//			bFlag?"true":"false"
+//			);
+
+	return bFlag;
+}
+
+bool DBManager::UpdateManCanSend(
+		const Man& man,
+		int iSiteId,
+		bool bCanSend
+		) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::UpdateManInfo( "
+			"tid : %d, "
+			"[在内存表更新男士能否收信], "
+			"iSiteId : %d, "
+			"bCanSend : %s, "
+			"start "
+			")",
+			(int)syscall(SYS_gettid),
+			iSiteId,
+			bCanSend?"true":"false"
+			);
+
+	bool bFlag = false;
+
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	int iIndex = GetIndexBySiteId(iSiteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	if( bFlag ) {
+		sqlite3_stmt* stmtMan;
+		snprintf(sql, MAXSQLSIZE - 1,
+				"UPDATE man "
+				"SET `can_sent_%s` = ? "
+				"WHERE manid = '%s' "
+				";",
+				mpDbLady[iIndex].mPostfix.c_str(),
+				man.manId.c_str()
+				);
+
+		sqlite3_prepare_v2(mdb, sql, strlen(sql), &stmtMan, 0);
+
+		sqlite3_reset(stmtMan);
+
+		// can_sent
+		sqlite3_bind_int(stmtMan, 1, bCanSend);
+
+		sqlite3_step(stmtMan);
+
+		sqlite3_finalize(stmtMan);
+	}
+
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::UpdateManInfo( "
+			"tid : %d, "
+			"bFlag : %s, "
+			"end "
+			")",
+			(int)syscall(SYS_gettid),
+			bFlag?"true":"false"
+			);
+
+	return bFlag;
+}
+
+/**
+ * 在内存表更新男士收信数量
+ */
+bool DBManager::UpdateManSent(const Man& man, int iSiteId) {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::UpdateManSent( "
+			"tid : %d, "
+			"[在内存表更新男士收信数量], "
+			"iSiteId : %d "
+			"start "
+			")",
+			(int)syscall(SYS_gettid),
+			iSiteId
+			);
+
+	bool bFlag = false;
+
+	MYSQL_RES* pSQLRes = NULL;
+	short shIdt = 0;
+	int iRow = 0;
+	char sql[MAXSQLSIZE] = {'\0'};
+	int iSent = 0;
+
+	int iIndex = GetIndexBySiteId(iSiteId);
+	if( iIndex != INVALID_INDEX ) {
+		bFlag = true;
+	}
+
+	if( bFlag ) {
+		bFlag = false;
+
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT sent "
+				"FROM stats_admire_%s "
+				"WHERE manid = '%s' "
+				";",
+				mpDbLady[iIndex].mPostfix.c_str(),
+				man.manId.c_str()
+		);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::UpdateManSent( "
+				"tid : %d, "
+				"sql : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql
+				);
+
+		if( SQL_TYPE_SELECT == mDBSpool.ExecuteSQL(sql, &pSQLRes, shIdt, iRow) ) {
+			int iFields = mysql_num_fields(pSQLRes);
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"DBManager::UpdateManSent( "
+					"tid : %d, "
+					"iRow : %d, "
+					"iFields : %d "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iFields
+					);
+
+			if (iFields > 0) {
+				MYSQL_FIELD* fields;
+				MYSQL_ROW row;
+				fields = mysql_fetch_fields(pSQLRes);
+
+				for (int i = 0; i < iRow; i++) {
+					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+						break;
+					}
+
+					bFlag = true;
+
+					iSent = atoi(row[0]);
+				}
+			}
+		}
+		mDBSpool.ReleaseConnection(shIdt);
+
+		if( bFlag ) {
+			sqlite3_stmt* stmtMan;
+			snprintf(sql, MAXSQLSIZE - 1,
+					"UPDATE man "
+					"SET `sent_%s` = ? "
+					"WHERE manid = '%s' "
+					";",
+					mpDbLady[iIndex].mPostfix.c_str(),
+					man.manId.c_str()
+					);
+
+			sqlite3_prepare_v2(mdb, sql, strlen(sql), &stmtMan, 0);
+
+			sqlite3_reset(stmtMan);
+
+			// sent
+			sqlite3_bind_int(stmtMan, 1, iSent);
+
+			sqlite3_step(stmtMan);
+
+			sqlite3_finalize(stmtMan);
+		}
+
+		if( !bFlag ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::UpdateManSent( "
+					"tid : %d, "
+					"[在内存表更新男士收信数量] "
+					"失败, 标记男士为不能发送意向信,  "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+
+			UpdateManCanSend(man, iIndex, false);
+		}
+	}
+
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::UpdateManSent( "
+			"tid : %d, "
+			"bFlag : %s, "
+			"end "
+			")",
+			(int)syscall(SYS_gettid),
+			bFlag?"true":"false"
+			);
+
+	return bFlag;
+}
+
+bool DBManager::ExecSQL(sqlite3 *db, const char* sql, char** msg) {
+	int ret;
+	do {
+		ret = sqlite3_exec( db, sql, NULL, NULL, msg );
+		if( ret == SQLITE_BUSY ) {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::ExecSQL( "
+					"tid : %d, "
+					"ret == SQLITE_BUSY, "
+					"sqlite3_errmsg() : %s, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sqlite3_errmsg(db),
+					sql
+					);
+
+			if ( msg != NULL ) {
+				sqlite3_free(msg);
+				msg= NULL;
+			}
+			sleep(1);
+		}
+		if( ret != SQLITE_OK ) {
+			LogManager::GetLogManager()->Log(
+					LOG_ERR_USER,
+					"DBManager::ExecSQL( "
+					"tid : %d, "
+					"ret != SQLITE_OK, "
+					"ret : %d, "
+					"sqlite3_errmsg() : %s, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					ret,
+					sqlite3_errmsg(db),
+					sql
+					);
+//			printf("# DBManager::ExecSQL( ret != SQLITE_OK, ret : %d ) \n", ret);
+		}
+	} while( ret == SQLITE_BUSY );
+
+	return ( ret == SQLITE_OK );
+}
+bool DBManager::QuerySQL(sqlite3 *db, const char* sql, char*** result, int* iRow, int* iColumn, char** msg) {
+	int ret;
+	do {
+		ret = sqlite3_get_table( db, sql, result, iRow, iColumn, msg );
+		if( ret == SQLITE_BUSY ) {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::QuerySQL( "
+					"tid : %d, "
+					"ret == SQLITE_BUSY, "
+					"sqlite3_errmsg() : %s, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sqlite3_errmsg(db),
+					sql
+					);
+			if ( msg != NULL ) {
+				sqlite3_free(msg);
+				msg= NULL;
+			}
+			sleep(1);
+		}
+
+		if( ret != SQLITE_OK ) {
+			LogManager::GetLogManager()->Log(
+					LOG_ERR_USER,
+					"DBManager::QuerySQL( "
+					"tid : %d, "
+					"ret != SQLITE_OK, "
+					"ret : %d, "
+					"sqlite3_errmsg() : %s, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					ret,
+					sqlite3_errmsg(db),
+					sql
+					);
+		}
+	} while( ret == SQLITE_BUSY );
+
+	return ( ret == SQLITE_OK );
+}
+
+void DBManager::FinishQuery(char** result) {
+	// free memory
+	sqlite3_free_table(result);
 }

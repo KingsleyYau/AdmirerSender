@@ -9,34 +9,44 @@
 #define Man_H_
 
 #include <string>
+#include <map>
 using namespace std;
 
 class Man {
 public:
 	Man() {
-		mManId = "";
-		mManName = "";
-		mPaidAmount = 0;
+		manId = "";
+		manName = "";
+		login_time = "";
+		reg_time = "";
+		paidAmount = 0;
 	}
 
 	virtual ~Man(){};
 
 	Man(const Man& item){
-		mManId = item.mManId;
-		mManName = item.mManName;
-
+		manId = item.manId;
+		manName = item.manName;
+		login_time = item.login_time;
+		reg_time = item.reg_time;
+		paidAmount = item.paidAmount;
 	}
 
 	Man& operator=(const Man& item) {
-		mManId = item.mManId;
-		mManName = item.mManName;
-		mPaidAmount = item.mPaidAmount;
+		manId = item.manId;
+		manName = item.manName;
+		login_time = item.login_time;
+		reg_time = item.reg_time;
+		paidAmount = item.paidAmount;
 		return *this;
 	}
 
-	string mManId;
-	string mManName;
-	int mPaidAmount;
+	string manId;
+	string manName;
+	string login_time;
+	string reg_time;
+	double paidAmount;
+
 };
 
 #endif /* MAN_H_ */

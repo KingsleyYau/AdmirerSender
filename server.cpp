@@ -6,6 +6,8 @@
  *      Email: Kingsleyyau@gmail.com
  */
 
+#include "AdmirerSender.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,8 +16,6 @@
 
 #include <string>
 using namespace std;
-
-#include "AdmirerSender.h"
 
 #define VERSION_STRING "Version : 1.0.0"
 

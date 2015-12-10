@@ -11,6 +11,8 @@
 
 LadyDBLetterSender::LadyDBLetterSender(const Lady& lady, DBManager* pDBManager) : LadyLetterSender(lady) {
 	mpDBManager = pDBManager;
+	mRegulation = "";
+	mTemplate.Reset();
 }
 
 LadyDBLetterSender::~LadyDBLetterSender() {
@@ -23,43 +25,46 @@ bool LadyDBLetterSender::CanSendLetter() {
 		return false;
 	}
 
-	return mpDBManager->CanSendLetter(mLady);
-}
-
-bool LadyDBLetterSender::SendLetter() {
-	bool bFlag = false;
-
-	string regulation = "";
-	string templateCode = "";
-
 	// 获取规则
+	mRegulation = "";
 	if( !mLady.mRegulationList.empty() ) {
 		int r = rand() % mLady.mRegulationList.size();
 		int i = 0;
 		for(list<string>::iterator itr = mLady.mRegulationList.begin(); itr != mLady.mRegulationList.end(); itr++, i++) {
 			if( r == i ) {
-				regulation = *itr;
+				mRegulation = *itr;
 				break;
 			}
 		}
 	}
 
 	// 获取模板
-	mpDBManager->GetLadyRegulationInfo(mLady, regulation);
+	mTemplate.Reset();
+	mpDBManager->GetLadyRegulationInfo(mLady, mRegulation);
 	if( !mLady.mTemplateList.empty() ) {
 		int r = rand() % mLady.mTemplateList.size();
 		int i = 0;
-		for(list<string>::iterator itr = mLady.mTemplateList.begin(); itr != mLady.mTemplateList.end(); itr++, i++) {
+		for(list<AdmireTemplate>::iterator itr = mLady.mTemplateList.begin(); itr != mLady.mTemplateList.end(); itr++, i++) {
 			if( r == i ) {
-				templateCode = *itr;
+				mTemplate = *itr;
 				break;
 			}
 		}
 	}
 
+	if( mTemplate.templateCode.length() == 0 || mTemplate.templateType.length() == 0 ) {
+		return false;
+	}
+
+	return mpDBManager->CanSendLetter(mLady, mTemplate);
+}
+
+bool LadyDBLetterSender::SendLetter() {
+	bool bFlag = false;
+
 	// 向数据库写入信件
-	if( regulation.length() > 0 && templateCode.length() > 0 ) {
-		bFlag = mpDBManager->SendLetter(mLady, regulation, templateCode);
+	if( mRegulation.length() > 0 && mTemplate.templateCode.length() > 0 ) {
+		bFlag = mpDBManager->SendLetter(mLady, mRegulation, mTemplate);
 	}
 
 	if( bFlag ) {
@@ -84,4 +89,10 @@ int LadyDBLetterSender::GetErrorCode() {
 
 string LadyDBLetterSender::GetAgentId() {
 	return mLady.mAgentId;
+}
+
+bool LadyDBLetterSender::FinishLetter() {
+	bool bFlag = false;
+	bFlag = mpDBManager->FinishLetter(mLady);
+	return bFlag;
 }

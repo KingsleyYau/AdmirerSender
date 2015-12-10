@@ -16,21 +16,25 @@ CXXFLAGS = -O2 -g
 endif
 
 CXXFLAGS +=	-Wall -fmessage-length=0
-CXXFLAGS +=	-I. -Ilibev -I/usr/include/mysql
+CXXFLAGS +=	-I. -Ilibev -Ijson -Isqlite -I/usr/include/mysql
 
 LIBS =		-L. \
 			-Wl,-Bstatic -Llibev/.libs -lev \
+			-Wl,-Bstatic -Lsqlite/.libs -lsqlite3 \
 			-Wl,-Bdynamic -L/usr/lib64/mysql -L/usr/lib/mysql -lmysqlclient \
 			-Wl,-Bdynamic -ldl -lz -lpthread 
 			
-OBJS =		server.o KThread.o LogManager.o LogFile.o ConfFile.o Arithmetic.o  md5.o \
-			TcpServer.o MessageList.o DataParser.o DataHttpParser.o DBSpool.o DBManager.o \
+COMMONOBJ =	common/LogFile.o common/md5.o common/KThread.o \
+			common/ConfFile.o common/Arithmetic.o common/DBSpool.o
+JSONOBJS = 	json/json_reader.o json/json_value.o json/json_writer.o
+OBJS =		server.o LogManager.o TcpServer.o MessageList.o \
+			DataParser.o DataHttpParser.o DBManager.o \
 			AdmirerSender.o LadyDBLetterSender.o
-JSONOBJS = 	json_reader.o json_value.o json_writer.o
+OBJS +=		$(COMMONOBJ)
 OBJS += 	$(JSONOBJS)
 TARGET =	admirersender
 
-DEPDIRS	:= libev
+DEPDIRS	:= libev sqlite
 CLEAN_DEPS := $(addprefix _clean_, $(DEPDIRS))
 
 .PHONY: all deps clean cleanall install $(DEPDIRS) $(TARGET)

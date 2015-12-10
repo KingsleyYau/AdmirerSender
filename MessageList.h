@@ -9,13 +9,12 @@
 #ifndef MESSAGELIST_H_
 #define MESSAGELIST_H_
 
+#include <ev.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#include <ev.h>
-
 #include <pthread.h>
 
 #include <list>

@@ -24,6 +24,7 @@ public:
 	virtual bool SendLetter() = 0;
 	virtual int GetErrorCode() = 0;
 	virtual string GetAgentId() = 0;
+	virtual bool FinishLetter() = 0;
 };
 
 #endif /* ILETTERSENDER_H_ */

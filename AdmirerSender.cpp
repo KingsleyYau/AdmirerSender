@@ -7,10 +7,6 @@
  */
 
 #include "AdmirerSender.h"
-#include "TimeProc.hpp"
-#include "LadyDBLetterSender.h"
-
-#include <sys/syscall.h>
 
 /* send thread */
 class SendLetterRunnable : public KRunnable {
@@ -123,12 +119,12 @@ void AdmirerSender::Run() {
 	mIsRunning = true;
 
 	/* db manager */
+	mDBManager.SetDBManagerCallback(this);
 	bFlag = mDBManager.Init(
 			mDbMan,
 			miDbCount,
 			mDbLady
 			);
-	mDBManager.SetDBManagerCallback(this);
 
 	if( !bFlag ) {
 		printf("# Admirer Sender can not initialize database exit. \n");
@@ -200,6 +196,7 @@ bool AdmirerSender::Reload() {
 			mDbMan.mUser = conf.GetPrivate("DB", "DBUSER", "root");
 			mDbMan.mPasswd = conf.GetPrivate("DB", "DBPASS", "123456");
 			mDbMan.miMaxDatabaseThread = atoi(conf.GetPrivate("DB", "MAXDATABASETHREAD", "4").c_str());
+			mDbMan.miSyncTime = 60 * atoi(conf.GetPrivate("DB", "SYNCTIME", "30").c_str());
 			miDbCount = atoi(conf.GetPrivate("DB", "DB_COUNT", "0").c_str());
 
 			char domain[4] = {'\0'};
@@ -616,6 +613,8 @@ void AdmirerSender::ClearLetterSendList(
 			);
 	bool bFlag = false;
 
+	mDBManager.SetAllLetterDelete();
+
 	ILetterSender* sender;
 	while( (sender = mLadyLetterList.PopFront()) != NULL ) {
 		delete sender;
@@ -661,7 +660,7 @@ void AdmirerSender::AddLadyToAgent(const string& agentId) {
 	mAgentMap.Unlock();
 
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_STAT,
 			"AdmirerSender::AddLadyToAgent( "
 			"tid : %d, "
 			"agentId: %s, "
@@ -676,10 +675,10 @@ void AdmirerSender::AddLadyToAgent(const string& agentId) {
 void AdmirerSender::RemoveLadyFromAgent(const string& agentId) {
 	int iCount = 0;
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_STAT,
 			"AdmirerSender::RemoveLadyFromAgent( "
 			"tid : %d, "
-			"AgentId: %s "
+			"agentId: %s "
 			")",
 			(int)syscall(SYS_gettid),
 			agentId.c_str()
@@ -696,7 +695,7 @@ void AdmirerSender::RemoveLadyFromAgent(const string& agentId) {
 	mAgentMap.Unlock();
 
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_STAT,
 			"AdmirerSender::RemoveLadyFromAgent( "
 			"tid : %d, "
 			"agentId: %s, "
@@ -757,41 +756,41 @@ void AdmirerSender::StateRunnableHandle() {
 					(int)syscall(SYS_gettid),
 					(MessageList*) mLadyLetterList.Size()
 					);
-			LogManager::GetLogManager()->Log(LOG_WARNING,
-					"AdmirerSender::StateRunnable( "
-					"tid : %d, "
-					"iTotal : %u, "
-					"iHit : %u, "
-					"iSecondTotal : %.1lf, "
-					"iSecondHit : %.1lf, "
-					"iResponed : %.1lf, "
-					"iStateTime : %u "
-					")",
-					(int)syscall(SYS_gettid),
-					iTotal,
-					iHit,
-					iSecondTotal,
-					iSecondHit,
-					iResponed,
-					iStateTime
-					);
-			LogManager::GetLogManager()->Log(LOG_WARNING,
-					"AdmirerSender::StateRunnable( "
-					"tid : %d, "
-					"过去%u秒共收到%u个请求, "
-					"成功处理%u个请求, "
-					"平均收到%.1lf个/秒, "
-					"平均处理%.1lf个/秒, "
-					"平均响应时间%.1lf毫秒/个"
-					")",
-					(int)syscall(SYS_gettid),
-					iStateTime,
-					iTotal,
-					iHit,
-					iSecondTotal,
-					iSecondHit,
-					iResponed
-					);
+//			LogManager::GetLogManager()->Log(LOG_WARNING,
+//					"AdmirerSender::StateRunnable( "
+//					"tid : %d, "
+//					"iTotal : %u, "
+//					"iHit : %u, "
+//					"iSecondTotal : %.1lf, "
+//					"iSecondHit : %.1lf, "
+//					"iResponed : %.1lf, "
+//					"iStateTime : %u "
+//					")",
+//					(int)syscall(SYS_gettid),
+//					iTotal,
+//					iHit,
+//					iSecondTotal,
+//					iSecondHit,
+//					iResponed,
+//					iStateTime
+//					);
+//			LogManager::GetLogManager()->Log(LOG_WARNING,
+//					"AdmirerSender::StateRunnable( "
+//					"tid : %d, "
+//					"过去%u秒共收到%u个请求, "
+//					"成功处理%u个请求, "
+//					"平均收到%.1lf个/秒, "
+//					"平均处理%.1lf个/秒, "
+//					"平均响应时间%.1lf毫秒/个"
+//					")",
+//					(int)syscall(SYS_gettid),
+//					iStateTime,
+//					iTotal,
+//					iHit,
+//					iSecondTotal,
+//					iSecondHit,
+//					iResponed
+//					);
 
 			iStateTime = miStateTime;
 		}
@@ -822,36 +821,38 @@ void AdmirerSender::SendRunnableHandle() {
 
 			unsigned int iHandleTime = GetTickCount();
 
-			if( sender->CanSendLetter() ) {
+			bool bFlag = sender->CanSendLetter();
+			if( bFlag ) {
 				// Send letter
-				bool bFlag = sender->SendLetter();
+				bFlag = sender->SendLetter();
 
 				if( !bFlag ) {
 					// Check error code
 					switch( sender->GetErrorCode() ) {
 					case SEND_FIAL_TOO_MORE_TIME: {
-						// Remove letter from Agent
-						RemoveLadyFromAgent(sender->GetAgentId());
-
-						// Drop sender
-						delete sender;
-
-						continue;
-
+						// Can't send any more
 					}break;
-					default:break;
+					default:{
+						bFlag = true;
+					}break;
 					}
 				}
 
+			}
+
+			if( bFlag ) {
 				// Push back into send list
 				mLadyLetterList.PushBack(sender);
-
 			} else {
+				// Can't send any more
+				sender->FinishLetter();
+
 				// Remove sender from Agent
 				RemoveLadyFromAgent(sender->GetAgentId());
 
 				// Drop sender
 				delete sender;
+				sender = NULL;
 			}
 
 			iHandleTime =  GetTickCount() - iHandleTime;

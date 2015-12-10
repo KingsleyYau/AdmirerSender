@@ -20,9 +20,13 @@ public:
 	bool SendLetter();
 	int GetErrorCode();
 	string GetAgentId();
+	bool FinishLetter();
 
 protected:
 	DBManager* mpDBManager;
+
+	string mRegulation;
+	AdmireTemplate mTemplate;
 };
 
 #endif /* LADYDBLETTERSENDER_H_ */

@@ -9,12 +9,12 @@
 #define DATAHTTPPARSER_H_
 
 #include "DataParser.h"
-#include "Arithmetic.hpp"
 #include "MessageList.h"
+
+#include <common/Arithmetic.hpp>
 
 #include <stdio.h>
 #include <stdlib.h>
-
 #include <ctype.h>
 #include <algorithm>
 
