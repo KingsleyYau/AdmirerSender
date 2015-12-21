@@ -20,7 +20,7 @@
 #include <list>
 using namespace std;
 
-#define MAXLEN 2048
+#define MAXLEN 4096
 typedef struct Message {
 	int		fd;
 	int 	len;

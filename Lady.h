@@ -17,6 +17,7 @@ using namespace std;
 class Lady {
 public:
 	Lady() {
+		id = "";
 		mRecordId = 0;
 		mSiteId = 0;
 		mWomanId = "";
@@ -37,12 +38,21 @@ public:
 		mReligion = "";
 		mIsBirthday = 0;
 
+		lastname = "";
+		birthday = "";
+		country = "";
+		height = "";
+		weight = "";
+		marry = "";
+		province = "";
+
 		mFailTimes = 0;
 	}
 
 	virtual ~Lady(){};
 
 	Lady(const Lady& item){
+		id = item.id;
 		mRecordId = item.mRecordId;
 		mSiteId = item.mSiteId;
 		mWomanId = item.mWomanId;
@@ -67,11 +77,20 @@ public:
 		mEthnicity = item.mEthnicity;
 		mReligion = item.mReligion;
 		mIsBirthday = item.mIsBirthday;
+
+		lastname = item.lastname;
+		birthday = item.birthday;
+		country = item.country;
+		height = item.height;
+		weight = item.weight;
+		marry = item.marry;
+		province = item.province;
 
 		mFailTimes = item.mFailTimes;
 	}
 
 	Lady& operator=(const Lady& item) {
+		id = item.id;
 		mRecordId = item.mRecordId;
 		mSiteId = item.mSiteId;
 		mWomanId = item.mWomanId;
@@ -96,6 +115,14 @@ public:
 		mEthnicity = item.mEthnicity;
 		mReligion = item.mReligion;
 		mIsBirthday = item.mIsBirthday;
+
+		lastname = item.lastname;
+		birthday = item.birthday;
+		country = item.country;
+		height = item.height;
+		weight = item.weight;
+		marry = item.marry;
+		province = item.province;
 
 		mFailTimes = item.mFailTimes;
 
@@ -131,6 +158,16 @@ public:
 	string mEthnicity;
 	string mReligion;
 	int mIsBirthday;
+
+	// 女士资料
+	string id;
+	string lastname;
+	string birthday;
+	string country;
+	string height;
+	string weight;
+	string marry;
+	string province;
 
 	int mFailTimes;
 };

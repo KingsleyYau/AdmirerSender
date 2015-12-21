@@ -25,6 +25,7 @@
 
 typedef KSafeMap<string, int> AgentMap;
 typedef KSafeList<ILetterSender*> LetterSendList;
+typedef KSafeMap<string, LetterSendList> LadyLetterSendListMap;
 
 class StateRunnable;
 class SendLetterRunnable;
@@ -126,6 +127,7 @@ private:
 	DBSTRUCT mDbMan;
 	int miDbCount;
 	DBSTRUCT mDbLady[4];
+	DBSTRUCT mDbEmail;
 
 	// LOG
 	int miLogLevel;

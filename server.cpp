@@ -17,7 +17,7 @@
 #include <string>
 using namespace std;
 
-#define VERSION_STRING "Version : 1.0.0"
+#define VERSION_STRING "1.0.1"
 
 string sConf = "";  // 配置文件
 
@@ -25,7 +25,7 @@ bool Parse(int argc, char *argv[]);
 
 int main(int argc, char *argv[]) {
 	printf("############## Admirer Sender ############## \n");
-	printf("# %s \n", VERSION_STRING);
+	printf("# Version : %s \n", VERSION_STRING);
 	printf("# Build date : %s %s \n", __DATE__, __TIME__ );
 
 	srand(time(0));

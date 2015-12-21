@@ -8,6 +8,9 @@
 
 #include "AdmirerSender.h"
 
+#define MIN(A,B) ((A)<(B)?(A):(B))
+#define MAX(A,B) ((A)>(B)?(A):(B))
+
 /* send thread */
 class SendLetterRunnable : public KRunnable {
 public:
@@ -123,7 +126,8 @@ void AdmirerSender::Run() {
 	bFlag = mDBManager.Init(
 			mDbMan,
 			miDbCount,
-			mDbLady
+			mDbLady,
+			mDbEmail
 			);
 
 	if( !bFlag ) {
@@ -164,6 +168,11 @@ void AdmirerSender::Run() {
 		return;
 	}
 
+	mDBManager.SyncForce();
+	for(int i = 0; i < miDbCount; i++) {
+		mDBManager.SyncLadyForce(mDbLady[i].miSiteId);
+	}
+
 	printf("# AdmirerSender start OK. \n");
 	LogManager::GetLogManager()->Log(LOG_WARNING, "AdmirerSender::Run( Init OK )");
 
@@ -198,6 +207,14 @@ bool AdmirerSender::Reload() {
 			mDbMan.miMaxDatabaseThread = atoi(conf.GetPrivate("DB", "MAXDATABASETHREAD", "4").c_str());
 			mDbMan.miSyncTime = 60 * atoi(conf.GetPrivate("DB", "SYNCTIME", "30").c_str());
 			miDbCount = atoi(conf.GetPrivate("DB", "DB_COUNT", "0").c_str());
+
+			// [DB_EMAIL]
+			mDbEmail.mHost = conf.GetPrivate("DB_EMAIL", "DBHOST", "localhost");
+			mDbEmail.mPort = atoi(conf.GetPrivate("DB_EMAIL", "DBPORT", "3306").c_str());
+			mDbEmail.mDbName = conf.GetPrivate("DB_EMAIL", "DBNAME", "qpidnetwork_online");
+			mDbEmail.mUser = conf.GetPrivate("DB_EMAIL", "DBUSER", "root");
+			mDbEmail.mPasswd = conf.GetPrivate("DB_EMAIL", "DBPASS", "123456");
+			mDbEmail.miMaxDatabaseThread = atoi(conf.GetPrivate("DB_EMAIL", "MAXDATABASETHREAD", "4").c_str());
 
 			char domain[4] = {'\0'};
 			for(int i = 0; i < miDbCount; i++) {
@@ -548,7 +565,7 @@ void AdmirerSender::SyncLadyList(
 			siteId
 			);
 
-	mDBManager.SyncLadyList(atoi(siteId));
+	mDBManager.SyncLadyForce(atoi(siteId));
 }
 
 void AdmirerSender::GetAgentSendStatus(
@@ -611,7 +628,7 @@ void AdmirerSender::ClearLetterSendList(
 			(int)syscall(SYS_gettid),
 			m->fd
 			);
-	bool bFlag = false;
+//	bool bFlag = false;
 
 	mDBManager.SetAllLetterDelete();
 
@@ -869,7 +886,7 @@ void AdmirerSender::SendRunnableHandle() {
 					);
 
 			LogManager::GetLogManager()->Log(
-					LOG_MSG,
+					LOG_STAT,
 					"AdmirerSender::SendRunnableHandle( "
 					"tid : %d "
 					"######################################## "
@@ -877,7 +894,11 @@ void AdmirerSender::SendRunnableHandle() {
 					(int)syscall(SYS_gettid)
 					);
 
-			sleep(1);
+			iHandleTime = MAX(50, iHandleTime);
+			iHandleTime = MIN(1000, iHandleTime);
+
+			usleep(iHandleTime);
+
 		} else {
 			// Noting to send
 			sleep(1);

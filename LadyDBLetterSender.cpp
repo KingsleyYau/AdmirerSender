@@ -7,7 +7,7 @@
 
 #include "LadyDBLetterSender.h"
 
-#define FAIL_TIMES 1
+#define FAIL_TIMES 3
 
 LadyDBLetterSender::LadyDBLetterSender(const Lady& lady, DBManager* pDBManager) : LadyLetterSender(lady) {
 	mpDBManager = pDBManager;

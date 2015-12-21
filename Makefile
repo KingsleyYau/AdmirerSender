@@ -29,7 +29,7 @@ COMMONOBJ =	common/LogFile.o common/md5.o common/KThread.o \
 JSONOBJS = 	json/json_reader.o json/json_value.o json/json_writer.o
 OBJS =		server.o LogManager.o TcpServer.o MessageList.o \
 			DataParser.o DataHttpParser.o DBManager.o \
-			AdmirerSender.o LadyDBLetterSender.o
+			AdmirerSender.o LadyDBLetterSender.o PhpObject.o
 OBJS +=		$(COMMONOBJ)
 OBJS += 	$(JSONOBJS)
 TARGET =	admirersender

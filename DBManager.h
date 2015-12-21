@@ -11,6 +11,7 @@
 #include "LogManager.h"
 #include "Lady.h"
 #include "Man.h"
+#include "PhpObject.h"
 
 #include <common/TimeProc.hpp>
 #include <common/StringHandle.h>
@@ -43,6 +44,7 @@ typedef struct DBStruct {
 		mPostfix = "";
 		miSyncTime = 0;
 		miSyncIndex = 0;
+		mbSyncForce = false;
 	}
 
 	DBStruct(const DBStruct& item) {
@@ -57,6 +59,7 @@ typedef struct DBStruct {
 		mPostfix = item.mPostfix;
 		miSyncTime = item.miSyncTime;
 		miSyncIndex = item.miSyncIndex;
+		mbSyncForce = item.miSyncIndex;
 	}
 
 	DBStruct& operator=(const DBStruct& item) {
@@ -71,6 +74,7 @@ typedef struct DBStruct {
 		mPostfix = item.mPostfix;
 		miSyncTime = item.miSyncTime;
 		miSyncIndex = item.miSyncIndex;
+		mbSyncForce = item.miSyncIndex;
 		return *this;
 	}
 
@@ -85,6 +89,9 @@ typedef struct DBStruct {
 	string mPostfix;
 	int miSyncTime;
 	int miSyncIndex;
+
+	bool mbSyncForce;
+	KMutex mSyncMutex;
 
 //	int miLastUpdate;
 } DBSTRUCT;
@@ -114,30 +121,30 @@ public:
 	bool Init(
 			const DBSTRUCT& dbMan,
 			int iDbCount,
-			const DBSTRUCT* dbLady
+			const DBSTRUCT* dbLady,
+			const DBSTRUCT& dbEmail
 			);
 
 	void SetDBManagerCallback(DBManagerCallback *pDBManagerCallback);
 
 	/**
-	 * 强制同步
+	 * 强制同步男士
 	 * @description 		数据库->内存表
 	 */
 	void SyncForce();
 
 	/**
-	 * 增量获取女士
+	 * 强制同步女士
 	 * @description 		数据库->内存
-	 * @param siteId		站点Id
 	 */
-	void SyncLadyList(int siteId);
+	void SyncLadyForce(int siteId);
 
 	/**
 	 * 女士是否可发意向信
 	 * @description 	内存->数据库
 	 * @param lady		女士
 	 */
-	bool CanSendLetter(const Lady& lady, const AdmireTemplate& admireTemplate);
+	bool CanSendLetter(Lady& lady, const AdmireTemplate& admireTemplate);
 
 	/**
 	 * 获取女士条件和模板
@@ -161,7 +168,7 @@ public:
 	 * @param lady			女士
 	 * @param man			男士
 	 */
-	bool CanRecvLetter(const Lady& lady, const Man& man);
+	bool CanRecvLetter(const Lady& lady, Man& man);
 
 	/**
 	 * 女士发送一封信件
@@ -212,9 +219,22 @@ private:
 	 */
 	string SqlTransfer(const string& sql);
 
+	/**
+	 * php加密算法
+	 */
+	string EncryptWin(const string& str);
+
 	/****************************** 功能函数start ***********************************************/
 
 	/****************************** 数据库函数start ***********************************************/
+
+	/**
+	 * 增量获取女士
+	 * @description 		数据库->内存
+	 * @param siteId		站点Id
+	 */
+	void SyncLadyList(int siteId);
+
 	/**
 	 * 根据女士条件发送信件给男士
 	 * @description 		内存->数据库
@@ -222,7 +242,12 @@ private:
 	 * @param templateCode	模板号
 	 * @param man			男士
 	 */
-	bool SendLetter2Man(const Lady& lady, const string& regulation, const AdmireTemplate& admireTemplate, const Man& man);
+	bool SendLetter2Man(
+			const Lady& lady,
+			const string& regulation,
+			const AdmireTemplate& admireTemplate,
+			Man& man
+			);
 
 	/**
 	 * 更新数据FAV表
@@ -233,17 +258,36 @@ private:
 	bool UpdateFAV(const Lady& lady, const Man& man);
 
 	/**
+	 * 以前审核功能的部分代码,以前需要审核信件，现在不需要，摘必须功能
+	 */
+	bool UpdateMsgProcessList(const Man& man, const Lady& lady);
+
+	/**
+	 * 更新一大堆东西
+	 */
+	bool UpdateEmailSystem(
+			const Man& man,
+			const Lady& lady,
+			string admireBody,
+			unsigned long long iInsertId = 0
+			);
+
+	/**
 	 * 8.男士在5天內EMF通信关系超过50对
 	 * 只有是付费会员时才检测这个条件
 	 * @description 失败会把内存表男士标记为不能收信
+	 * @param man			男士
+	 * @param lady			女士
 	 */
-	bool CheckEMFCount(const Man& man);
+	bool CheckEMFCount(const Man& man, const Lady& lady);
 
 	/**
 	 * 检查男士分站信息
 	 * @description 失败会把内存表男士标记为分站不能收信
+	 * @param man			男士
+	 * @param lady			女士
 	 */
-	bool CheckManInfo(const Man& man, const Lady& lady);
+	bool CheckManInfo(Man& man, const Lady& lady);
 
 	/**
 	 * 6.男士当天收到多于manmaxnumoneday封意向信即禁发
@@ -281,6 +325,7 @@ private:
 	 * 检查女士自定义条件
 	 */
 	bool CheckLadyCondition(const Man& man, const Lady& lady);
+
 	/****************************** 数据库函数end ***********************************************/
 
 	/****************************** 同步数据函数start ***********************************************/
@@ -379,8 +424,11 @@ private:
 	 */
 	DBSTRUCT mDbMan;
 	DBSTRUCT* mpDbLady;
+	DBSTRUCT mDbEmail;
+
 	DBSpool mDBSpool;
 	DBSpool mDBSpoolLady[4];
+	DBSpool mDBSpoolEmail;
 
 	/**
 	 * 同步线程
