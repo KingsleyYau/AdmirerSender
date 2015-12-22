@@ -2375,6 +2375,17 @@ bool DBManager::UpdateEmailSystem(
 					id.c_str()
 			);
 
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::UpdateEmailSystem( "
+					"tid : %d, "
+					"[更新一大堆东西], "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+
 			res.clear();
 			if ( SQL_TYPE_UPDATE == mDBSpoolEmail.ExecuteSQL(sql, &res, iRow) ) {
 				if( iRow > 0 ) {
@@ -2415,13 +2426,24 @@ bool DBManager::UpdateEmailSystem(
 					"status = 'N' "
 					";",
 					man.manId.c_str(),
-					man.manName.c_str(),
-					man.lastName.c_str(),
-					man.email.c_str(),
+					SqlTransfer(man.manName).c_str(),
+					SqlTransfer(man.lastName).c_str(),
+					SqlTransfer(man.email).c_str(),
 					man.sid.c_str(),
 					senthour,
-					phpObjectWomanInfo.Serialize().c_str()
+					SqlTransfer(phpObjectWomanInfo.Serialize()).c_str()
 			);
+
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::UpdateEmailSystem( "
+					"tid : %d, "
+					"[更新一大堆东西], "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
 
 			res.clear();
 			if ( SQL_TYPE_INSERT == mDBSpoolEmail.ExecuteSQL(sql, &res, iRow) ) {
