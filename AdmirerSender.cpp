@@ -692,7 +692,7 @@ void AdmirerSender::AddLadyToAgent(const string& agentId) {
 void AdmirerSender::RemoveLadyFromAgent(const string& agentId) {
 	int iCount = 0;
 	LogManager::GetLogManager()->Log(
-			LOG_STAT,
+			LOG_MSG,
 			"AdmirerSender::RemoveLadyFromAgent( "
 			"tid : %d, "
 			"agentId: %s "
@@ -860,6 +860,7 @@ void AdmirerSender::SendRunnableHandle() {
 			if( bFlag ) {
 				// Push back into send list
 				mLadyLetterList.PushBack(sender);
+
 			} else {
 				// Can't send any more
 				sender->FinishLetter();

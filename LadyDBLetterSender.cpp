@@ -20,7 +20,7 @@ LadyDBLetterSender::~LadyDBLetterSender() {
 }
 
 bool LadyDBLetterSender::CanSendLetter() {
-	if( mLady.mFailTimes > FAIL_TIMES ) {
+	if( mLady.mFailTimes >= FAIL_TIMES ) {
 		// 连续3次发送失败
 		return false;
 	}

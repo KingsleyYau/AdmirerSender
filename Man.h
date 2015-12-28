@@ -37,6 +37,7 @@ public:
 		reg_time = item.reg_time;
 		paidAmount = item.paidAmount;
 		admirerNotify = item.admirerNotify;
+		sid = item.sid;
 		lastName = item.lastName;
 		email = item.email;
 	}
@@ -49,7 +50,7 @@ public:
 		reg_time = item.reg_time;
 		paidAmount = item.paidAmount;
 		admirerNotify = item.admirerNotify;
-		sid = "";
+		sid = item.sid;
 		lastName = item.lastName;
 		email = item.email;
 		return *this;

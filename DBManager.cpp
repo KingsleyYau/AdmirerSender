@@ -1161,7 +1161,7 @@ bool DBManager::SendLetter(
 				);
 
 		snprintf(sql, MAXSQLSIZE - 1,
-				"SELECT manid, manname, paid_amount, login_time, sent_%s "
+				"SELECT manid, manname, paid_amount, login_time, admirerNotify, sid, lastName, email, mid, sent_%s "
 				"FROM man "
 				"WHERE can_sent_%s = 1 "
 				"ORDER BY sent_%s  "
@@ -1203,6 +1203,11 @@ bool DBManager::SendLetter(
 						"manname : %s, "
 						"paidAmount : %s, "
 						"login_time : %s, "
+						"admirerNotify : %s, "
+						"sid : %s, "
+						"lastName : %s, "
+						"email : %s, "
+						"id : %s, "
 						"sent : %s "
 						")",
 						(int)syscall(SYS_gettid),
@@ -1210,20 +1215,34 @@ bool DBManager::SendLetter(
 						result[i * iColumn + 1],
 						result[i * iColumn + 2],
 						result[i * iColumn + 3],
-						result[i * iColumn + 4]
+						result[i * iColumn + 4],
+						result[i * iColumn + 5],
+						result[i * iColumn + 6],
+						result[i * iColumn + 7],
+						result[i * iColumn + 8],
+						result[i * iColumn + 9]
 						);
 
 				Man man;
-				if( result[i * iColumn] != NULL ) {
-					man.manId = result[i * iColumn];
-				}
-
-				if( result[i * iColumn + 1] != NULL ) {
-					man.manName = result[i * iColumn + 1];
-				}
+				man.manId = result[i * iColumn];
+				man.manName = result[i * iColumn + 1];
 
 				if( result[i * iColumn + 2] != NULL ) {
 					man.paidAmount = atof(result[i * iColumn + 2]);
+				}
+
+				man.login_time = (result[i * iColumn + 3]);
+
+				if( result[i * iColumn + 4] != NULL ) {
+					man.admirerNotify = atoi(result[i * iColumn + 4]);
+				}
+
+				man.sid = result[i * iColumn + 5];
+				man.lastName = result[i * iColumn + 6];
+				man.email = result[i * iColumn + 7];
+
+				if( result[i * iColumn + 8] != NULL ) {
+					man.id = atoi(result[i * iColumn + 8]);
 				}
 
 				/**
@@ -2366,9 +2385,9 @@ bool DBManager::UpdateEmailSystem(
 			snprintf(sql, MAXBIGSQLSIZE - 1,
 					"UPDATE msg_process_list "
 					"SET number = %d, "
-					"lastupdatetime = 'DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\")', "
+					"lastupdatetime = DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\"), "
 					"info = '%s' "
-					"WHERE id = '%s' "
+					"WHERE id = %s "
 					";",
 					number + 1,
 					SqlTransfer(admireInfo).c_str(),
@@ -2407,7 +2426,7 @@ bool DBManager::UpdateEmailSystem(
 
 		} else {
 			char senthour[64];
-			sprintf(senthour, "%lld", man.id % 24);
+			sprintf(senthour, "%lld", (man.id % 24));
 
 			snprintf(sql, MAXBIGSQLSIZE - 1,
 					"INSERT INTO msg_process_list "
@@ -2417,12 +2436,12 @@ bool DBManager::UpdateEmailSystem(
 					"email = '%s', "
 					"sid = '%s', "
 					"type = 2, "
-					"addtime = 'DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\")', "
+					"addtime = DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\"), "
 					"senthour = %s, "
 					"womansiteid = 0, "
 					"info = '%s', "
-					"number = 1,"
-					"lastupdatetime = 'DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\")', "
+					"number = 1, "
+					"lastupdatetime = DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\"), "
 					"status = 'N' "
 					";",
 					man.manId.c_str(),
@@ -2504,7 +2523,7 @@ string DBManager::SqlTransfer(const string& sql) {
 	result = StringHandle::replace(sql, "'", "\\'");
 	result = StringHandle::replace(result, "%", "\\%");
 	result = StringHandle::replace(result, "_", "\\_");
-	result = StringHandle::replace(result, "\"", "\\\"");
+//	result = StringHandle::replace(result, "\"", "\\\"");
 	result = StringHandle::replace(result, "\\", "\\\\");
 
 	return result;
@@ -3623,8 +3642,8 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 	ExecSQL( mdb, "BEGIN;", NULL );
 	sqlite3_stmt* stmtMan;
 	snprintf(sql, MAXSQLSIZE - 1,
-			"REPLACE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`) "
-			"VALUES(?, ?, ?, ?, ?)"
+			"REPLACE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`, `admirerNotify`, `sid`, `lastName`, `email`, `mid`) "
+			"VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 			);
 	sqlite3_prepare_v2(mdb, sql, strlen(sql), &stmtMan, 0);
 
@@ -3813,8 +3832,8 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 	ExecSQL( mdb, "BEGIN;", NULL );
 	sqlite3_stmt* stmtMan;
 	snprintf(sql, MAXSQLSIZE - 1,
-			"REPLACE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`) "
-			"VALUES(?, ?, ?, ?, ?)"
+			"REPLACE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`, `admirerNotify`, `sid`, `lastName`, `email`, `mid`) "
+			"VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 			);
 	sqlite3_prepare_v2(mdb, sql, strlen(sql), &stmtMan, 0);
 
@@ -4080,7 +4099,7 @@ bool DBManager::SyncManBasicInfo(Man& man) {
 	char sql[MAXSQLSIZE] = {'\0'};
 
 	snprintf(sql, MAXSQLSIZE - 1,
-			"SELECT info_basic.firstname, info_basic.submitdate, info_core.paid_amount, info_basic.lastname, info_core.email, info_core.id "
+			"SELECT info_basic.firstname, info_basic.submitdate, info_core.paid_amount, info_basic.lastname, info_core.email, info_core.id, info_core.sid "
 			"FROM info_basic, info_core "
 			"WHERE info_basic.manid = info_core.manid "
 			"AND info_basic.manid = '%s' "
@@ -4110,9 +4129,10 @@ bool DBManager::SyncManBasicInfo(Man& man) {
 				man.paidAmount = atof(row[2]);
 				man.lastName = row[3];
 				man.email = row[4];
-				if( row[4] != NULL ) {
-					man.id = atoll(row[4]);
+				if( row[5] != NULL ) {
+					man.id = atoll(row[5]);
 				}
+				man.sid = row[6];
 
 			}
 		}
@@ -4143,8 +4163,7 @@ bool DBManager::CheckManCountEnougth() {
 			LOG_MSG,
 			"DBManager::CheckManCountEnougth( "
 			"tid : %d, "
-			"[查询内存表男士是否足够], "
-			"start "
+			"[查询内存表男士是否足够] "
 			")",
 			(int)syscall(SYS_gettid)
 			);
@@ -4211,9 +4230,9 @@ bool DBManager::CheckManCountEnougth() {
 			LOG_MSG,
 			"DBManager::CheckManCountEnougth( "
 			"tid : %d, "
+			"[查询内存表男士是否足够], "
 			"bFlag : %s, "
-			"iTotal : %d, "
-			"end "
+			"iTotal : %d "
 			")",
 			(int)syscall(SYS_gettid),
 			bFlag?"true":"false",
@@ -4267,6 +4286,11 @@ bool DBManager::CreateTable(sqlite3 *db) {
 						"login_time TEXT, "
 						"reg_time TEXT, "
 						"paid_amount DECIMAL, "
+						"admirerNotify INT, "
+						"sid TEXT, "
+						"lastName TEXT, "
+						"email TEXT, "
+						"mid INT, "
 						"%s "
 						");",
 						site.c_str()
@@ -4415,6 +4439,21 @@ bool DBManager::InsertManFromDataBase(sqlite3_stmt* stmtMan, const Man &man) {
 
 	// paid_amount
 	sqlite3_bind_double(stmtMan, 5, man.paidAmount);
+
+	// admirerNotify
+	sqlite3_bind_int(stmtMan, 6, man.admirerNotify);
+
+	// sid
+	sqlite3_bind_text(stmtMan, 7, man.sid.c_str(), man.sid.length(), NULL);
+
+	// lastName
+	sqlite3_bind_text(stmtMan, 8, man.lastName.c_str(), man.lastName.length(), NULL);
+
+	// email
+	sqlite3_bind_text(stmtMan, 9, man.email.c_str(), man.email.length(), NULL);
+
+	// id
+	sqlite3_bind_int(stmtMan, 10, man.id);
 
 	sqlite3_step(stmtMan);
 
