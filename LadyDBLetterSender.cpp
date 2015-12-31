@@ -7,7 +7,7 @@
 
 #include "LadyDBLetterSender.h"
 
-#define FAIL_TIMES 3
+#define FAIL_TIMES 1
 
 LadyDBLetterSender::LadyDBLetterSender(const Lady& lady, DBManager* pDBManager) : LadyLetterSender(lady) {
 	mpDBManager = pDBManager;
@@ -21,7 +21,7 @@ LadyDBLetterSender::~LadyDBLetterSender() {
 
 bool LadyDBLetterSender::CanSendLetter() {
 	if( mLady.mFailTimes >= FAIL_TIMES ) {
-		// 连续3次发送失败
+		// 连续N次发送失败
 		return false;
 	}
 
@@ -79,16 +79,13 @@ bool LadyDBLetterSender::SendLetter() {
 }
 
 int LadyDBLetterSender::GetErrorCode() {
-	if( mLady.mFailTimes > FAIL_TIMES ) {
+	if( mLady.mFailTimes >= FAIL_TIMES ) {
 		// 连续3次发送失败
 		return SEND_FIAL_TOO_MORE_TIME;
+
 	} else {
 		return NONE;
 	}
-}
-
-string LadyDBLetterSender::GetAgentId() {
-	return mLady.mAgentId;
 }
 
 bool LadyDBLetterSender::FinishLetter() {
@@ -96,3 +93,11 @@ bool LadyDBLetterSender::FinishLetter() {
 	bFlag = mpDBManager->FinishLetter(mLady);
 	return bFlag;
 }
+
+//string LadyDBLetterSender::GetAgentId() {
+//	return mLady.mAgentId;
+//}
+//
+//string LadyDBLetterSender::GetPersonId() {
+//	return mLady.mWomanId;
+//}

@@ -228,7 +228,7 @@ void DBManager::SyncLadyList(int siteId) {
 			LOG_MSG,
 			"DBManager::SyncLadyList( "
 			"tid : %d, "
-			"[增量获取女士], "
+			"[增量同步女士], "
 			"siteId : %d "
 			")",
 			(int)syscall(SYS_gettid),
@@ -246,6 +246,14 @@ void DBManager::SyncLadyList(int siteId) {
 	if( iIndex != INVALID_INDEX ) {
 		bFlag = true;
 	}
+
+	ExecSQL(mdb, "BEGIN;", NULL);
+	sqlite3_stmt* stmtLady = NULL;
+	snprintf(sql, MAXSQLSIZE - 1,
+			"REPLACE INTO woman(`womanid`, `siteid`, `can_sent`) "
+			"VALUES(?, ?, 1)"
+			);
+	sqlite3_prepare_v2(mdb, sql, strlen(sql), &stmtLady, 0);
 
 	/**
 	 * 增量同步女士
@@ -325,14 +333,15 @@ void DBManager::SyncLadyList(int siteId) {
 						pos = regulations.find(",", index);
 				    }
 
+				    // 插入内存表
+				    InsertLadyFromDataBase(stmtLady, item);
+
 					if( mpDBManagerCallback != NULL ) {
-						mpDBManagerCallback->OnGetLady(this, item);
+						mpDBManagerCallback->OnSyncLady(this, item);
 					}
 
-//					if( i == iRow - 1 ) {
-//						mpDbLady[iIndex].miLastUpdate = atoi(row[0]);
-//					}
 				}
+
 			}
 		}
 		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
@@ -352,18 +361,85 @@ void DBManager::SyncLadyList(int siteId) {
 		}
 	}
 
+	sqlite3_finalize(stmtLady);
+	ExecSQL(mdb, "COMMIT;", NULL);
+
 	LogManager::GetLogManager()->Log(
 			LOG_MSG,
 			"DBManager::SyncLadyList( "
 			"tid : %d, "
 			"[增量获取女士], "
 			"siteId : %d, "
-			"bFlag : %s "
+			"bFlag : %s, "
+			"iRow : %d "
 			")",
 			(int)syscall(SYS_gettid),
 			siteId,
-			bFlag?"true":"false"
+			bFlag?"true":"false",
+			iRow
 			);
+}
+
+bool DBManager::GetLadyList() {
+	bool bFlag = false;
+
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	snprintf(sql, MAXSQLSIZE - 1,
+			"SELECT womanid, siteid, sort "
+			"FROM woman "
+			"WHERE can_sent = 1 "
+			"ORDER BY sort "
+			";"
+	);
+
+	bool bResult = false;
+	char** result = NULL;
+	int iRow = 0;
+	int iColumn = 0;
+	unsigned int iHandleSendListTime = GetTickCount();
+
+	bResult = QuerySQL(mdb, sql, &result, &iRow, &iColumn, NULL);
+	if( bResult && result ) {
+		iHandleSendListTime =  GetTickCount() - iHandleSendListTime;
+
+		if( iRow > 0 ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::GetLadyList( "
+					"tid : %d, "
+					"[获取可发送的女士列表], "
+					"iRow : %d, "
+					"iColumn : %d, "
+					"iHandleSendListTime : %u ms "
+					")",
+					(int)syscall(SYS_gettid),
+					iRow,
+					iColumn,
+					iHandleSendListTime
+					);
+		}
+
+		for(int i = 1; i < iRow + 1; i++) {
+			bFlag = true;
+
+			Lady item;
+			item.mWomanId = result[i * iColumn];
+			if( result[i * iColumn + 1] != NULL ) {
+				item.mSiteId = atoi(result[i * iColumn + 1]);
+			}
+			if( result[i * iColumn + 2] != NULL ) {
+				item.iSort = atoi(result[i * iColumn + 2]);
+			}
+
+			if( mpDBManagerCallback != NULL ) {
+				mpDBManagerCallback->OnGetLady(this, item);
+			}
+		}
+	}
+	FinishQuery(result);
+
+	return bFlag;
 }
 
 bool DBManager::CanSendLetter(
@@ -384,7 +460,6 @@ bool DBManager::CanSendLetter(
 			"siteId : %d, "
 			"templateCode : %s, "
 			"templateType : %s "
-			"start "
 			")",
 			(int)syscall(SYS_gettid),
 			womanId.c_str(),
@@ -700,15 +775,14 @@ bool DBManager::CanSendLetter(
 		}
 	}
 
-	iHandleTime =  GetTickCount() - iHandleTime;
+	iHandleTime = GetTickCount() - iHandleTime;
 
 	LogManager::GetLogManager()->Log(
 			LOG_STAT,
 			"DBManager::CanSendLetter( "
 			"tid : %d, "
 			"bFlag : %s, "
-			"iHandleTime : %u ms, "
-			"end "
+			"iHandleTime : %u ms "
 			")",
 			(int)syscall(SYS_gettid),
 			bFlag?"true":"false",
@@ -1011,8 +1085,7 @@ bool DBManager::CanRecvLetter(
 			"DBManager::CanRecvLetter( "
 			"tid : %d, "
 			"womanId : %s, "
-			"manId : %s, "
-			"start "
+			"manId : %s "
 			")",
 			(int)syscall(SYS_gettid),
 			lady.mWomanId.c_str(),
@@ -1093,8 +1166,7 @@ bool DBManager::CanRecvLetter(
 			"DBManager::CanRecvLetter( "
 			"tid : %d, "
 			"bFlag : %s, "
-			"iHandleTime : %u ms, "
-			"end "
+			"iHandleTime : %u ms "
 			")",
 			(int)syscall(SYS_gettid),
 			bFlag?"true":"false",
@@ -1262,12 +1334,11 @@ bool DBManager::SendLetter(
 	iHandleTime =  GetTickCount() - iHandleTime;
 
 	LogManager::GetLogManager()->Log(
-			LOG_STAT,
+			LOG_MSG,
 			"DBManager::SendLetter( "
 			"tid : %d, "
 			"bFlag : %s, "
-			"iHandleTime : %u ms, "
-			"end "
+			"iHandleTime : %u ms "
 			")",
 			(int)syscall(SYS_gettid),
 			bFlag?"true":"false",
@@ -1463,13 +1534,14 @@ bool DBManager::SendLetter2Man(
 			"womanId : %s, "
 			"templateCode : %s, "
 			"manId : %s, "
-			"start "
+			"manName : %s "
 			")",
 			(int)syscall(SYS_gettid),
 			recordId,
 			womanId.c_str(),
 			admireTemplate.templateCode.c_str(),
-			manId.c_str()
+			manId.c_str(),
+			man.manName.c_str()
 			);
 
 	unsigned int iHandleTime = GetTickCount();
@@ -1531,7 +1603,7 @@ bool DBManager::SendLetter2Man(
 		admirebody += (admireTemplate.at_show_cn  == "Y" && admireTemplate.at_content_cn.length() > 0)?(line + admireTemplate.at_content_cn):"";
 
 		LogManager::GetLogManager()->Log(
-				LOG_STAT,
+				LOG_MSG,
 				"DBManager::SendLetter2Man( "
 				"tid : %d, "
 				"[获取附件和模板], "
@@ -2048,10 +2120,17 @@ bool DBManager::SendLetter2Man(
 	}
 
 	/**
-	 * 更新内存男士表已收信数量
+	 * 在内存表更新男士收信数量
 	 */
 	if( bFlag ) {
 		UpdateManSent(man, siteId);
+	}
+
+	/**
+	 *	在内存表更新女士发信排序
+	 */
+	if( bFlag ) {
+		UpdateLadySent(lady);
 	}
 
 	iHandleTime =  GetTickCount() - iHandleTime;
@@ -2251,8 +2330,7 @@ bool DBManager::UpdateEmailSystem(
 			"manId : %s, "
 			"womanId : %s, "
 			"siteId : %d, "
-			"admireBody : %s, "
-			"start "
+			"admireBody : %s "
 			")",
 			(int)syscall(SYS_gettid),
 			man.manId.c_str(),
@@ -2280,7 +2358,6 @@ bool DBManager::UpdateEmailSystem(
 
 	if( iInsertId != 0 ) {
 		// 根据女士信息生成数据
-		phpObjectWomanInfo.Reset();
 		phpObjectWomanInfo["birthday"] 		= lady.birthday;
 		phpObjectWomanInfo["firstname"] 	= lady.mWomanName;
 		phpObjectWomanInfo["lastname"]  	= lady.lastname;
@@ -2362,17 +2439,64 @@ bool DBManager::UpdateEmailSystem(
 		}
 		mDBSpoolEmail.ReleaseConnection(shIdt);
 
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::UpdateEmailSystem( "
+				"tid : %d, "
+				"[更新一大堆东西], "
+				"bFlag : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				bFlag?"true":"false"
+				);
+
 		if( bFlag ) {
 			PhpObject phpObjectAdmireInfo;
 			phpObjectAdmireInfo.Append(phpObjectWomanInfo);
 
 			if( info.length() > 0 ) {
+				LogManager::GetLogManager()->Log(
+						LOG_STAT,
+						"DBManager::UpdateEmailSystem( "
+						"tid : %d, "
+						"[更新一大堆东西(更新)], "
+						"info : %s "
+						")",
+						(int)syscall(SYS_gettid),
+						info.c_str()
+						);
+
 				PhpObject phpObjectInfo;
 				bool bResult = phpObjectInfo.UnSerialize(info);
+				LogManager::GetLogManager()->Log(
+						LOG_STAT,
+						"DBManager::UpdateEmailSystem( "
+						"tid : %d, "
+						"[更新一大堆东西(更新)], "
+						"phpObjectInfo.UnSerialize(info), bResult : %s, "
+						"phpObjectInfo.isArray() : %s, "
+						"phpObjectInfo.size() : %d "
+						")",
+						(int)syscall(SYS_gettid),
+						bResult?"true":"false",
+						phpObjectInfo.isArray()?"true":"false",
+						phpObjectInfo.size()
+						);
+
 				if( bResult && phpObjectInfo.isArray() && phpObjectInfo.size() == 1 ) {
 					PhpObject* pItem = phpObjectInfo.GetObjectByIndex(0);
 					if( pItem != NULL && pItem->isMap() && (*pItem)["admireInfo"].isObject() ) {
-						(*pItem)["admireInfo"] = 0;
+						LogManager::GetLogManager()->Log(
+								LOG_STAT,
+								"DBManager::UpdateEmailSystem( "
+								"tid : %d, "
+								"[更新一大堆东西(更新)], "
+								"(*pItem)[\"admireInfo\"] : %s "
+								")",
+								(int)syscall(SYS_gettid),
+								(*pItem)["admireInfo"].asString().c_str()
+								);
+						(*pItem)["admireInfo"] = "";
 					}
 				}
 				phpObjectWomanInfo["admireInfo"] = "";
@@ -2398,7 +2522,7 @@ bool DBManager::UpdateEmailSystem(
 					LOG_MSG,
 					"DBManager::UpdateEmailSystem( "
 					"tid : %d, "
-					"[更新一大堆东西], "
+					"[更新一大堆东西(更新)], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -2457,7 +2581,7 @@ bool DBManager::UpdateEmailSystem(
 					LOG_MSG,
 					"DBManager::UpdateEmailSystem( "
 					"tid : %d, "
-					"[更新一大堆东西], "
+					"[更新一大堆东西(插入)], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -3472,8 +3596,7 @@ bool DBManager::SetAllLetterDelete()
 			LOG_MSG,
 			"DBManager::SetAllLetterDelete( "
 			"tid : %d, "
-			"[设置所有意向信状态为删除], "
-			"start "
+			"[设置所有意向信状态为删除] "
 			")",
 			(int)syscall(SYS_gettid)
 			);
@@ -3512,32 +3635,81 @@ bool DBManager::SetAllLetterDelete()
 		}
 	}
 
-	snprintf(sql, MAXSQLSIZE - 1,
-			"DELETE * "
-			"FROM man "
-			";"
-	);
-
-	// 清空内存表
 	char** result = NULL;
 	int iColumn = 0;
-	bResult = QuerySQL(mdb, sql, &result, &iRow, &iColumn, NULL);
-	if( bResult && result ) {
 
-	} else {
-		LogManager::GetLogManager()->Log(
-				LOG_WARNING,
-				"DBManager::SetAllLetterDelete( "
-				"tid : %d, "
-				"[清空内存表], "
-				"失败, "
-				"sql : %s "
-				")",
-				(int)syscall(SYS_gettid),
-				sql
-				);
+	// 清空内存表所有男士
+	if( bResult ) {
+		snprintf(sql, MAXSQLSIZE - 1,
+				"DELETE "
+				"FROM man "
+				";"
+		);
+
+		bResult = QuerySQL(mdb, sql, &result, &iRow, &iColumn, NULL);
+		if( bResult && result ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::SetAllLetterDelete( "
+					"tid : %d, "
+					"[清空内存表所有男士], "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		} else {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SetAllLetterDelete( "
+					"tid : %d, "
+					"[清空内存表所有男士], "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		}
+		FinishQuery(result);
 	}
-	FinishQuery(result);
+
+	// 在内存表更新所有女士不能发信
+	if( bResult ) {
+		iColumn = 0;
+		snprintf(sql, MAXSQLSIZE - 1,
+				"UPDATE woman "
+				"SET can_sent = 0 "
+				";"
+				);
+
+		bResult = QuerySQL(mdb, sql, &result, &iRow, &iColumn, NULL);
+		if( bResult && result ) {
+			LogManager::GetLogManager()->Log(
+					LOG_MSG,
+					"DBManager::SetAllLetterDelete( "
+					"tid : %d, "
+					"[在内存表更新所有女士不能发信], "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		} else {
+			LogManager::GetLogManager()->Log(
+					LOG_WARNING,
+					"DBManager::SetAllLetterDelete( "
+					"tid : %d, "
+					"[在内存表更新所有女士不能发信], "
+					"失败, "
+					"sql : %s "
+					")",
+					(int)syscall(SYS_gettid),
+					sql
+					);
+		}
+		FinishQuery(result);
+	}
 
 	iHandleTime =  GetTickCount() - iHandleTime;
 
@@ -3546,8 +3718,7 @@ bool DBManager::SetAllLetterDelete()
 			"DBManager::SetAllLetterDelete( "
 			"tid : %d, "
 			"bResult : %s, "
-			"iHandleTime : %u ms, "
-			"end "
+			"iHandleTime : %u ms "
 			")",
 			(int)syscall(SYS_gettid),
 			bResult ? "true" : "false",
@@ -3589,6 +3760,11 @@ void DBManager::SyncManFromDatabase() {
 			break;
 		}
 
+	}
+
+	// 还原同步下标
+	for(int i = 0; i < miDbCount; i++) {
+		mpDbLady[i].miSyncIndex = 0;
 	}
 
 	while( !bEnougth ) {
@@ -3700,7 +3876,9 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 					Man man;
 					man.manId = row[0];
 					man.login_time = row[1];
-					man.paidAmount = atof(row[2]);
+					if( row[2] != NULL ) {
+						man.paidAmount = atof(row[2]);
+					}
 
 					bool bInsert = false;
 
@@ -3889,7 +4067,9 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 					Man man;
 					man.manId = row[0];
 					man.login_time = row[1];
-					man.paidAmount = atof(row[2]);
+					if( row[2] != NULL ) {
+						man.paidAmount = atof(row[2]);
+					}
 
 					bool bInsert = false;
 
@@ -4082,16 +4262,16 @@ bool DBManager::CheckManRegRecent(const Man& man) {
 }
 
 bool DBManager::SyncManBasicInfo(Man& man) {
-	LogManager::GetLogManager()->Log(
-			LOG_STAT,
-			"DBManager::SyncManBasicInfo( "
-			"tid : %d, "
-			"[从数据库同步男士基本信息], "
-			"manid : %s "
-			")",
-			(int)syscall(SYS_gettid),
-			man.manId.c_str()
-			);
+//	LogManager::GetLogManager()->Log(
+//			LOG_STAT,
+//			"DBManager::SyncManBasicInfo( "
+//			"tid : %d, "
+//			"[从数据库同步男士基本信息], "
+//			"manid : %s "
+//			")",
+//			(int)syscall(SYS_gettid),
+//			man.manId.c_str()
+//			);
 
 	bool bFlag = false;
 
@@ -4247,8 +4427,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 			LOG_STAT,
 			"DBManager::CreateTable( "
 			"tid : %d, "
-			"[创建内存表], "
-			"start "
+			"[创建内存表] "
 			")",
 			(int)syscall(SYS_gettid)
 			);
@@ -4258,26 +4437,129 @@ bool DBManager::CreateTable(sqlite3 *db) {
 	char sql[MAXSQLSIZE] = {'\0'};
 	char *msg = NULL;
 
+	// 男士分站数据
 	string site = "";
 
-	// sent
+	// 创建女士表
+	snprintf(sql, MAXSQLSIZE - 1,
+			"CREATE TABLE woman( "
+						"ID INTEGER PRIMARY KEY AUTOINCREMENT, "
+						"womanid TEXT, "
+						"siteid INT, "
+						"sort INT DEFAULT 0, "
+						"can_sent INT DEFAULT 1 "
+						");"
+	);
+
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CreateTable( "
+			"tid : %d, "
+			"sql : %s "
+			")",
+			(int)syscall(SYS_gettid),
+			sql
+			);
+
+	bFlag = ExecSQL( db, sql, &msg );
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_ERR_USER,
+				"DBManager::CreateTable( "
+				"tid : %d, "
+				"[创建女士表], "
+				"失败, "
+				"sql : %s, "
+				"msg : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql,
+				msg
+				);
+		if( msg != NULL) {
+			sqlite3_free(msg);
+			msg = NULL;
+		}
+
+		return false;
+	}
+
+	// 创建女士表索引(womanid)
+	snprintf(sql, MAXSQLSIZE - 1,
+			"CREATE UNIQUE INDEX woman_index_womanid "
+			"ON woman (womanid)"
+			";"
+	);
+
+	bFlag = ExecSQL( db, sql, &msg );
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_ERR_USER,
+				"DBManager::CreateTable( "
+				"tid : %d, "
+				"[创建女士表索引(womanid)], "
+				"失败, "
+				"sql : %s, "
+				"msg : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql,
+				msg
+				);
+		if( msg != NULL) {
+			sqlite3_free(msg);
+			msg = NULL;
+		}
+		return false;
+	}
+
+	// 创建女士表索引(sort)
+	snprintf(sql, MAXSQLSIZE - 1,
+			"CREATE INDEX woman_index_sort "
+			"ON woman (sort)"
+			";"
+	);
+
+	bFlag = ExecSQL( db, sql, &msg );
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_ERR_USER,
+				"DBManager::CreateTable( "
+				"tid : %d, "
+				"[创建女士表索引(sort)], "
+				"失败, "
+				"sql : %s, "
+				"msg : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql,
+				msg
+				);
+		if( msg != NULL) {
+			sqlite3_free(msg);
+			msg = NULL;
+		}
+		return false;
+	}
+
+	// 分站数据
 	for(int i = 0; i < miDbCount; i++) {
+		// 男士当天已经接收信件数量
 		site += "sent_";
 		site += mpDbLady[i].mPostfix;
 		site += " TINYINT DEFAULT 0,";
-	}
 
-	// cant_sent
-	for(int i = 0; i < miDbCount; i++) {
+		// 男士能否接收数据
 		site += "can_sent_";
 		site += mpDbLady[i].mPostfix;
 		site += " TINYINT DEFAULT 1,";
 	}
+
 	if( site.length() > 0 ) {
 		site = site.substr(0, site.length() - 1);
 	}
 
-	// 建男士表
+	// 创建男士表
 	snprintf(sql, MAXSQLSIZE - 1,
 			"CREATE TABLE man( "
 						"ID INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -4312,7 +4594,10 @@ bool DBManager::CreateTable(sqlite3 *db) {
 				LOG_ERR_USER,
 				"DBManager::CreateTable( "
 				"tid : %d, "
-				"Could not create table man, msg : %s "
+				"[创建男士表], "
+				"失败, "
+				"sql : %s, "
+				"msg : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				sql,
@@ -4326,7 +4611,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 		return false;
 	}
 
-	// 建男士表索引(manid)
+	// 创建男士表索引(manid)
 	snprintf(sql, MAXSQLSIZE - 1,
 			"CREATE UNIQUE INDEX man_index_manid "
 			"ON man (manid)"
@@ -4339,8 +4624,10 @@ bool DBManager::CreateTable(sqlite3 *db) {
 				LOG_ERR_USER,
 				"DBManager::CreateTable( "
 				"tid : %d, "
+				"[创建男士表索引(manid)], "
+				"失败, "
 				"sql : %s, "
-				"Could not create index man_index_manid, msg : %s "
+				"msg : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				sql,
@@ -4353,7 +4640,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 		return false;
 	}
 
-	// 建男士表索引(last_login)
+	// 创建男士表索引(login_time)
 	snprintf(sql, MAXSQLSIZE - 1,
 			"CREATE INDEX man_index_login_time "
 			"ON man (login_time)"
@@ -4366,8 +4653,10 @@ bool DBManager::CreateTable(sqlite3 *db) {
 				LOG_ERR_USER,
 				"DBManager::CreateTable( "
 				"tid : %d, "
+				"[创建男士表索引(login_time)], "
+				"失败, "
 				"sql : %s, "
-				"Could not create index man_index_login_time, msg : %s "
+				"msg : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				sql,
@@ -4380,7 +4669,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 		return false;
 	}
 
-	// 建男士表索引(reg_time)
+	// 创建男士表索引(reg_time)
 	snprintf(sql, MAXSQLSIZE - 1,
 			"CREATE INDEX man_index_reg_time "
 			"ON man (reg_time)"
@@ -4393,8 +4682,10 @@ bool DBManager::CreateTable(sqlite3 *db) {
 				LOG_ERR_USER,
 				"DBManager::CreateTable( "
 				"tid : %d, "
+				"[创建男士表索引(reg_time)], "
+				"失败, "
 				"sql : %s, "
-				"Could not create index man_index_reg_time, msg : %s "
+				"msg : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				sql,
@@ -4410,17 +4701,23 @@ bool DBManager::CreateTable(sqlite3 *db) {
 	return true;
 }
 
-bool DBManager::InsertManFromDataBase(sqlite3_stmt* stmtMan, const Man &man) {
-//	LogManager::GetLogManager()->Log(
-//			LOG_STAT,
-//			"DBManager::InsertManFromDataBase( "
-//			"tid : %d, "
-//			"[插入男士到内存表], "
-//			"start "
-//			")",
-//			(int)syscall(SYS_gettid)
-//			);
+bool DBManager::InsertLadyFromDataBase(sqlite3_stmt* stmtLady, const Lady lady) {
+	bool bFlag = true;
 
+	sqlite3_reset(stmtLady);
+
+	// womanid
+	sqlite3_bind_text(stmtLady, 1, lady.mWomanId.c_str(), lady.mWomanId.length(), NULL);
+
+	// siteid
+	sqlite3_bind_int(stmtLady, 2, lady.mSiteId);
+
+	sqlite3_step(stmtLady);
+
+	return bFlag;
+}
+
+bool DBManager::InsertManFromDataBase(sqlite3_stmt* stmtMan, const Man &man) {
 	bool bFlag = true;
 
 	sqlite3_reset(stmtMan);
@@ -4456,17 +4753,6 @@ bool DBManager::InsertManFromDataBase(sqlite3_stmt* stmtMan, const Man &man) {
 	sqlite3_bind_int(stmtMan, 10, man.id);
 
 	sqlite3_step(stmtMan);
-
-//	LogManager::GetLogManager()->Log(
-//			LOG_STAT,
-//			"DBManager::InsertManFromDataBase( "
-//			"tid : %d, "
-//			"bFlag : %s, "
-//			"end "
-//			")",
-//			(int)syscall(SYS_gettid),
-//			bFlag?"true":"false"
-//			);
 
 	return bFlag;
 }
@@ -4536,9 +4822,6 @@ bool DBManager::UpdateManCanSend(
 	return bFlag;
 }
 
-/**
- * 在内存表更新男士收信数量
- */
 bool DBManager::UpdateManSent(const Man& man, int iSiteId) {
 	LogManager::GetLogManager()->Log(
 			LOG_STAT,
@@ -4546,7 +4829,6 @@ bool DBManager::UpdateManSent(const Man& man, int iSiteId) {
 			"tid : %d, "
 			"[在内存表更新男士收信数量], "
 			"iSiteId : %d "
-			"start "
 			")",
 			(int)syscall(SYS_gettid),
 			iSiteId
@@ -4662,6 +4944,109 @@ bool DBManager::UpdateManSent(const Man& man, int iSiteId) {
 	LogManager::GetLogManager()->Log(
 			LOG_STAT,
 			"DBManager::UpdateManSent( "
+			"tid : %d, "
+			"bFlag : %s "
+			")",
+			(int)syscall(SYS_gettid),
+			bFlag?"true":"false"
+			);
+
+	return bFlag;
+}
+
+/**
+ * 在内存表更新女士能否收信
+ */
+bool DBManager::UpdateLadyCanSend(const string& womanId, bool bCanSend) {
+	bool bFlag = true;
+
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	sqlite3_stmt* stmtLady;
+	snprintf(sql, MAXSQLSIZE - 1,
+			"UPDATE woman "
+			"SET can_sent = ? "
+			"WHERE womanid = '%s' "
+			";",
+			womanId.c_str()
+			);
+
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::UpdateLadyCanSend( "
+			"tid : %d, "
+			"[在内存表更新女士能否收信], "
+			"womanid : %s, "
+			"bCanSend : %s "
+			")",
+			(int)syscall(SYS_gettid),
+			womanId.c_str(),
+			bCanSend?"true":"false"
+			);
+
+	sqlite3_prepare_v2(mdb, sql, strlen(sql), &stmtLady, 0);
+
+	sqlite3_reset(stmtLady);
+
+	sqlite3_bind_int(stmtLady, 1, bCanSend);
+
+	sqlite3_step(stmtLady);
+
+	sqlite3_finalize(stmtLady);
+
+	return bFlag;
+}
+
+bool DBManager::UpdateLadySent(const Lady& lady) {
+	bool bFlag = false;
+
+	char sql[MAXSQLSIZE] = {'\0'};
+	char* msg = NULL;
+
+	snprintf(sql, MAXSQLSIZE - 1,
+			"UPDATE woman "
+			"SET sort = sort + 1 "
+			"WHERE womanid = '%s' "
+			";",
+			lady.mWomanId.c_str()
+			);
+
+	LogManager::GetLogManager()->Log(
+			LOG_MSG,
+			"DBManager::UpdateLadySent( "
+			"tid : %d, "
+			"[在内存表更新女士发信排序], "
+			"sql : %s "
+			")",
+			(int)syscall(SYS_gettid),
+			sql
+			);
+
+	bFlag = ExecSQL( mdb, sql, &msg );
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_WARNING,
+				"DBManager::UpdateLadySent( "
+				"tid : %d, "
+				"[在内存表更新女士发信排序], "
+				"失败, "
+				"sql : %s, "
+				"msg : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql,
+				msg
+				);
+		if( msg != NULL) {
+			sqlite3_free(msg);
+			msg = NULL;
+		}
+
+	}
+
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::UpdateLadySent( "
 			"tid : %d, "
 			"bFlag : %s, "
 			"end "

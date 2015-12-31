@@ -612,9 +612,6 @@ void AdmirerSender::GetAgentSendStatus(
 	statusNode = (int)bFlag;
 }
 
-/**
- * 清空发送队列
- */
 void AdmirerSender::ClearLetterSendList(
 		Message *m
 		) {
@@ -622,47 +619,174 @@ void AdmirerSender::ClearLetterSendList(
 			LOG_MSG,
 			"AdmirerSender::ClearLetterSendList( "
 			"tid : %d, "
-			"m->fd: [%d], "
-			"start "
+			"m->fd: [%d] "
 			")",
 			(int)syscall(SYS_gettid),
 			m->fd
 			);
 //	bool bFlag = false;
 
+	// 标记数据库信件为已完成
 	mDBManager.SetAllLetterDelete();
 
-	ILetterSender* sender;
-	while( (sender = mLadyLetterList.PopFront()) != NULL ) {
-		delete sender;
+	// 清空内存信件(三期)
+	mLadyLetterSendListMap.Lock();
+	for(LadyLetterSendListMap::iterator itr = mLadyLetterSendListMap.Begin(); itr != mLadyLetterSendListMap.End();) {
+		ILetterSender* sender;
+		while( (sender = itr->second.PopFront()) != NULL ) {
+			delete sender;
+		}
+
+		mLadyLetterSendListMap.Erase(itr++);
 	}
+	mLadyLetterSendListMap.Unlock();
+
+//	// 清空内存信件(二期)
+//	ILetterSender* sender;
+//	while( (sender = mLadyLetterList.PopFront()) != NULL ) {
+//		delete sender;
+//	}
 
 	mAgentMap.Lock();
 	mAgentMap.Clear();
 	mAgentMap.Unlock();
 
-	LogManager::GetLogManager()->Log(
-			LOG_MSG,
-			"AdmirerSender::ClearLetterSendList( "
-			"tid : %d, "
-			"m->fd: [%d], "
-			"end "
-			")",
-			(int)syscall(SYS_gettid),
-			m->fd
-			);
+}
+
+void AdmirerSender::OnSyncLady(
+		DBManager* pDBManager,
+		const Lady& item
+		) {
+	// 增加女士到机构
+//	AddLadyToAgent(item.mAgentId);
+
+	// 生成信件
+	ILetterSender *sender = new LadyDBLetterSender(item, pDBManager);
+
+//	// 增加信件(二期)
+//	mLadyLetterList.PushBack(sender);
+
+	// 增加信件到女士(三期)
+	mLadyLetterSendListMap.Lock();
+	LadyLetterSendListMap::iterator itr = mLadyLetterSendListMap.Find(item.mWomanId);
+	if( itr != mLadyLetterSendListMap.End() ) {
+		itr->second.PushBack(sender);
+
+	} else {
+		LetterSendList ladyLetterList;
+		ladyLetterList.PushBack(sender);
+		mLadyLetterSendListMap.Insert(item.mWomanId, ladyLetterList);
+	}
+	mLadyLetterSendListMap.Unlock();
 }
 
 void AdmirerSender::OnGetLady(
 		DBManager* pDBManager,
 		const Lady& item
 		) {
-	ILetterSender *sender = new LadyDBLetterSender(item, pDBManager);
+	// 发送信件(三期)
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"AdmirerSender::OnGetLady( "
+			"tid : %d, "
+			"womanid : %s, "
+			"siteid : %d, "
+			"sort : %d "
+			")",
+			(int)syscall(SYS_gettid),
+			item.mWomanId.c_str(),
+			item.mSiteId,
+			item.iSort
+			);
 
-	// 女士到 机构
-	AddLadyToAgent(item.mAgentId);
+	mLadyLetterSendListMap.Lock();
+	LadyLetterSendListMap::iterator itr = mLadyLetterSendListMap.Find(item.mWomanId);
+	if( itr != mLadyLetterSendListMap.End() ) {
+		ILetterSender* sender = itr->second.PopFront();
+		if( sender != NULL ) {
+			unsigned int iHandleTime = GetTickCount();
 
-	mLadyLetterList.PushBack(sender);
+			bool bFlag = sender->CanSendLetter();
+			if( bFlag ) {
+				// Send letter
+				bFlag = sender->SendLetter();
+
+				if( !bFlag ) {
+					// Check error code
+					switch( sender->GetErrorCode() ) {
+					case SEND_FIAL_TOO_MORE_TIME: {
+						// Can't send any more
+
+					}break;
+					default:{
+						bFlag = true;
+
+					}break;
+					}
+				}
+
+			}
+
+			if( bFlag ) {
+				// Push back into send list
+				itr->second.PushBack(sender);
+
+			} else {
+				// Can't send any more
+				sender->FinishLetter();
+
+				// Remove sender from Agent
+//				RemoveLadyFromAgent(item.mAgentId);
+
+				// Drop sender
+				delete sender;
+				sender = NULL;
+
+				if( itr->second.Empty() ) {
+					// 在内存表更新女士能否收信(三期)
+					mDBManager.UpdateLadyCanSend(itr->first, false);
+
+					// 删除女士(三期)
+					mLadyLetterSendListMap.Erase(itr);
+				}
+
+			}
+
+			iHandleTime =  GetTickCount() - iHandleTime;
+
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"AdmirerSender::OnGetLady( "
+					"tid : %d, "
+					"iHandleTime : %u ms "
+					")",
+					(int)syscall(SYS_gettid),
+					iHandleTime
+					);
+
+			LogManager::GetLogManager()->Log(
+					LOG_STAT,
+					"AdmirerSender::OnGetLady( "
+					"tid : %d "
+					"######################################## "
+					")",
+					(int)syscall(SYS_gettid)
+					);
+
+			iHandleTime = MAX(50, iHandleTime);
+			iHandleTime = MIN(1000, iHandleTime);
+
+			usleep(iHandleTime);
+
+		} else {
+			// Noting to send
+			sleep(1);
+
+		}
+
+	}
+	mLadyLetterSendListMap.Unlock();
+
 }
 
 void AdmirerSender::AddLadyToAgent(const string& agentId) {
@@ -706,7 +830,7 @@ void AdmirerSender::RemoveLadyFromAgent(const string& agentId) {
 	if( itr != mAgentMap.End() ) {
 		iCount = --(itr->second);
 		if( itr->second == 0 ) {
-			mAgentMap.Erase(agentId);
+			mAgentMap.Erase(itr);
 		}
 	}
 	mAgentMap.Unlock();
@@ -769,9 +893,9 @@ void AdmirerSender::StateRunnableHandle() {
 //					(MessageList*) mClientTcpServer.GetHandleMessageList()->Size()
 //					);
 			LogManager::GetLogManager()->Log(LOG_WARNING,
-					"AdmirerSender::StateRunnable( tid : %d, AdmirerSender::mLadyLetterList : %d )",
+					"AdmirerSender::StateRunnable( tid : %d, AdmirerSender::mLadyLetterSendListMap : %d )",
 					(int)syscall(SYS_gettid),
-					(MessageList*) mLadyLetterList.Size()
+					mLadyLetterSendListMap.Size()
 					);
 //			LogManager::GetLogManager()->Log(LOG_WARNING,
 //					"AdmirerSender::StateRunnable( "
@@ -825,84 +949,91 @@ void AdmirerSender::SendRunnableHandle() {
 			);
 
 	while( IsRunning() ) {
-		ILetterSender* sender = mLadyLetterList.PopFront();
-		if( sender != NULL ) {
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"AdmirerSender::SendRunnableHandle( "
-					"tid : %d, "
-					"start "
-					")",
-					(int)syscall(SYS_gettid)
-					);
-
-			unsigned int iHandleTime = GetTickCount();
-
-			bool bFlag = sender->CanSendLetter();
-			if( bFlag ) {
-				// Send letter
-				bFlag = sender->SendLetter();
-
-				if( !bFlag ) {
-					// Check error code
-					switch( sender->GetErrorCode() ) {
-					case SEND_FIAL_TOO_MORE_TIME: {
-						// Can't send any more
-					}break;
-					default:{
-						bFlag = true;
-					}break;
-					}
-				}
-
-			}
-
-			if( bFlag ) {
-				// Push back into send list
-				mLadyLetterList.PushBack(sender);
-
-			} else {
-				// Can't send any more
-				sender->FinishLetter();
-
-				// Remove sender from Agent
-				RemoveLadyFromAgent(sender->GetAgentId());
-
-				// Drop sender
-				delete sender;
-				sender = NULL;
-			}
-
-			iHandleTime =  GetTickCount() - iHandleTime;
-
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"AdmirerSender::SendRunnableHandle( "
-					"tid : %d, "
-					"iHandleTime : %u ms, "
-					"end "
-					")",
-					(int)syscall(SYS_gettid),
-					iHandleTime
-					);
-
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"AdmirerSender::SendRunnableHandle( "
-					"tid : %d "
-					"######################################## "
-					")",
-					(int)syscall(SYS_gettid)
-					);
-
-			iHandleTime = MAX(50, iHandleTime);
-			iHandleTime = MIN(1000, iHandleTime);
-
-			usleep(iHandleTime);
-
-		} else {
+		// 发送信件(三期)
+		if( !mDBManager.GetLadyList() ) {
 			// Noting to send
 			sleep(1);
 		}
+
+//		// 发送信件(二期)
+//		ILetterSender* sender = mLadyLetterList.PopFront();
+//		if( sender != NULL ) {
+//			LogManager::GetLogManager()->Log(
+//					LOG_STAT,
+//					"AdmirerSender::SendRunnableHandle( "
+//					"tid : %d, "
+//					"start "
+//					")",
+//					(int)syscall(SYS_gettid)
+//					);
+//
+//			unsigned int iHandleTime = GetTickCount();
+//
+//			bool bFlag = sender->CanSendLetter();
+//			if( bFlag ) {
+//				// Send letter
+//				bFlag = sender->SendLetter();
+//
+//				if( !bFlag ) {
+//					// Check error code
+//					switch( sender->GetErrorCode() ) {
+//					case SEND_FIAL_TOO_MORE_TIME: {
+//						// Can't send any more
+//					}break;
+//					default:{
+//						bFlag = true;
+//					}break;
+//					}
+//				}
+//
+//			}
+//
+//			if( bFlag ) {
+//				// Push back into send list
+//				mLadyLetterList.PushBack(sender);
+//
+//			} else {
+//				// Can't send any more
+//				sender->FinishLetter();
+//
+//				// Remove sender from Agent
+//				RemoveLadyFromAgent(sender->GetAgentId());
+//
+//				// Drop sender
+//				delete sender;
+//				sender = NULL;
+//			}
+//
+//			iHandleTime =  GetTickCount() - iHandleTime;
+//
+//			LogManager::GetLogManager()->Log(
+//					LOG_STAT,
+//					"AdmirerSender::SendRunnableHandle( "
+//					"tid : %d, "
+//					"iHandleTime : %u ms, "
+//					"end "
+//					")",
+//					(int)syscall(SYS_gettid),
+//					iHandleTime
+//					);
+//
+//			LogManager::GetLogManager()->Log(
+//					LOG_STAT,
+//					"AdmirerSender::SendRunnableHandle( "
+//					"tid : %d "
+//					"######################################## "
+//					")",
+//					(int)syscall(SYS_gettid)
+//					);
+//
+//			iHandleTime = MAX(50, iHandleTime);
+//			iHandleTime = MIN(1000, iHandleTime);
+//
+//			usleep(iHandleTime);
+//
+//		} else {
+//			// Noting to send
+//			sleep(1);
+//		}
 	}
 }

@@ -51,6 +51,10 @@ public:
 	/**
 	 * Implement from DBManager
 	 */
+	void OnSyncLady(
+			DBManager* pDBManager,
+			const Lady& item
+			);
 	void OnGetLady(
 			DBManager* pDBManager,
 			const Lady& item
@@ -170,9 +174,14 @@ private:
 	unsigned int miStateTime;
 
 	/**
-	 * 待发送女士列表
+	 * 待发送信件列表(二期)
 	 */
 	LetterSendList mLadyLetterList;
+
+	/**
+	 * 待发送女士列表(三期)
+	 */
+	LadyLetterSendListMap mLadyLetterSendListMap;
 
 	/**
 	 * 机构统计列表

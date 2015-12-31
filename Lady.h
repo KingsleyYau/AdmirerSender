@@ -47,6 +47,7 @@ public:
 		province = "";
 
 		mFailTimes = 0;
+		iSort = 0;
 	}
 
 	virtual ~Lady(){};
@@ -87,6 +88,7 @@ public:
 		province = item.province;
 
 		mFailTimes = item.mFailTimes;
+		iSort = item.iSort;
 	}
 
 	Lady& operator=(const Lady& item) {
@@ -125,6 +127,7 @@ public:
 		province = item.province;
 
 		mFailTimes = item.mFailTimes;
+		iSort = item.iSort;
 
 		return *this;
 	}
@@ -170,6 +173,7 @@ public:
 	string province;
 
 	int mFailTimes;
+	int iSort;
 };
 
 #endif /* LADY_H_ */

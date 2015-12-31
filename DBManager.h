@@ -100,6 +100,18 @@ class DBManager;
 class DBManagerCallback {
 public:
 	virtual ~DBManagerCallback(){};
+
+	/**
+	 * 同步女士回调
+	 */
+	virtual void OnSyncLady(
+			DBManager* pDBManager,
+			const Lady& item
+			) = 0;
+
+	/**
+	 * 获取可以发送的女士回调
+	 */
 	virtual void OnGetLady(
 			DBManager* pDBManager,
 			const Lady& item
@@ -138,6 +150,12 @@ public:
 	 * @description 		数据库->内存
 	 */
 	void SyncLadyForce(int siteId);
+
+	/**
+	 * 获取可发送的女士列表
+	 * @description 		内存
+	 */
+	bool GetLadyList();
 
 	/**
 	 * 女士是否可发意向信
@@ -198,6 +216,11 @@ public:
 	 */
 	void HandleSyncDatabase();
 
+	/**
+	 * 在内存表更新女士能否发信
+	 */
+	bool UpdateLadyCanSend(const string& womanId, bool bCanSend);
+
 private:
 	/****************************** 功能函数start ***********************************************/
 
@@ -229,7 +252,7 @@ private:
 	/****************************** 数据库函数start ***********************************************/
 
 	/**
-	 * 增量获取女士
+	 * 增量同步女士
 	 * @description 		数据库->内存
 	 * @param siteId		站点Id
 	 */
@@ -369,6 +392,11 @@ private:
 	bool CreateTable(sqlite3 *db);
 
 	/**
+	 * 同步女士到内存表
+	 */
+	bool InsertLadyFromDataBase(sqlite3_stmt* stmtLady, const Lady lady);
+
+	/**
 	 * 插入男士到内存表
 	 */
 	bool InsertManFromDataBase(sqlite3_stmt* stmtMan, const Man &man);
@@ -387,6 +415,11 @@ private:
 	 * 在内存表更新男士收信数量
 	 */
 	bool UpdateManSent(const Man& man, int iSiteId);
+
+	/**
+	 * 在内存表更新女士发信排序
+	 */
+	bool UpdateLadySent(const Lady& lady);
 
 	/**
 	 * 内存表执行sql

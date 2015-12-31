@@ -19,8 +19,10 @@ public:
 	bool CanSendLetter();
 	bool SendLetter();
 	int GetErrorCode();
-	string GetAgentId();
 	bool FinishLetter();
+
+//	string GetAgentId();
+//	string GetPersonId();
 
 protected:
 	DBManager* mpDBManager;

@@ -138,7 +138,7 @@ bool LogManager::Log(LOG_LEVEL nLevel, const char *format, ...) {
             char *p = lm->buffer;
             va_list	agList;
             va_start(agList, format);
-            vsnprintf(p, MAXLEN, format, agList);
+            vsnprintf(p, MAXLEN - 1, format, agList);
             va_end(agList);
 
             strcat(lm->buffer, "\n");

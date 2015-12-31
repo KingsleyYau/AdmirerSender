@@ -17,7 +17,7 @@
 #include <string>
 using namespace std;
 
-#define VERSION_STRING "1.0.1"
+#define VERSION_STRING "1.0.2"
 
 string sConf = "";  // 配置文件
 
