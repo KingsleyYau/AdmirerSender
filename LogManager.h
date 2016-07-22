@@ -14,17 +14,19 @@
 #include <common/KThread.h>
 #include <common/LogFile.hpp>
 
+#include <string>
+using namespace std;
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
-
-#include <string>
-using namespace std;
 
 #define DiffGetTickCount(start, end)    ((start) <= (end) ? (end) - (start) : ((unsigned int)(-1)) - (start) + (end))
 
+class LogRunnable;
 class LogManager {
 public:
 
@@ -42,8 +44,8 @@ public:
 	bool Log(LOG_LEVEL nLevel, const char *format, ...);
 	int MkDir(const char* pDir);
 
-	MessageList *GetIdleMessageList();
-	MessageList *GetLogMessageList();
+//	MessageList *GetIdleMessageList();
+//	MessageList *GetLogMessageList();
 
 public:
 	MessageList mIdleMessageList;
@@ -51,6 +53,7 @@ public:
 
 private:
 	KThread *mpLogThread;
+	LogRunnable *mpLogRunnable;
 	bool mIsRunning;
 
 	string mLogDir;

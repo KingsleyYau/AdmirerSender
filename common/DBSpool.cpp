@@ -421,16 +421,33 @@ int DBConnection::ExecuteSQL(const string& strSQL, MYSQL_RES** res, int& iRelt, 
     int iTimes = DB_RECONNECT_TIMES;
     bool bTest = true;
 	bool bHasUnlock=false;
-    while (mysql_ping(m_pSQLConn)!=0 && iTimes>0){
-        bTest = false;
-        iTimes--;
-		if(!bHasUnlock) Unlock();//�Ƚ�����ΪConnect�е�DisConnect��TestIdle��Ҫ����
-		bHasUnlock = true;
-        if (Connect()){
-            bTest = true;
-            break;
-        }
-        usleep(DB_RECONNECT_TIMEOUT);
+    while (iTimes-- > 0){
+    	if( m_pSQLConn != NULL ) {
+        	if( mysql_ping(m_pSQLConn) != 0 ) {
+                bTest = false;
+        		if(!bHasUnlock) Unlock();//�Ƚ�����ΪConnect�е�DisConnect��TestIdle��Ҫ����
+        		bHasUnlock = true;
+                if (Connect()){
+                    bTest = true;
+                    break;
+                }
+
+        	} else {
+        		bTest = true;
+        		break;
+        	}
+
+    	} else {
+            bTest = false;
+    		if(!bHasUnlock) Unlock();//�Ƚ�����ΪConnect�е�DisConnect��TestIdle��Ҫ����
+    		bHasUnlock = true;
+            if (Connect()){
+                bTest = true;
+                break;
+            }
+    	}
+
+    	usleep(DB_RECONNECT_TIMEOUT);
     }
 	if(bHasUnlock)Lock();
     if (!bTest){
@@ -443,11 +460,17 @@ int DBConnection::ExecuteSQL(const string& strSQL, MYSQL_RES** res, int& iRelt, 
     switch (iType) {
         case SQL_TYPE_SELECT:
             m_pSQLRes = mysql_store_result(m_pSQLConn);
-            if (m_pSQLRes==NULL && mysql_field_count(m_pSQLConn)!=0){
-                return SQL_TYPE_UNKNOW;
+            if (m_pSQLRes==NULL){
+            	if( mysql_field_count(m_pSQLConn)!=0 ) {
+					iRelt = 0;
+            	} else {
+            		return SQL_TYPE_UNKNOW;
+            	}
+
             }else{
-                *res = m_pSQLRes;
-                iRelt = mysql_num_rows(m_pSQLRes);
+				*res = m_pSQLRes;
+				iRelt = mysql_num_rows(m_pSQLRes);
+
             }
             break;
         case SQL_TYPE_INSERT: {

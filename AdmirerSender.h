@@ -9,6 +9,8 @@
 #ifndef AdmirerSender_H_
 #define AdmirerSender_H_
 
+#define VERSION_STRING "1.0.7"
+
 #include "MessageList.h"
 #include "TcpServer.h"
 #include "DBManager.h"
@@ -34,18 +36,22 @@ public:
 	AdmirerSender();
 	virtual ~AdmirerSender();
 
-	void Run(const string& config);
-	void Run();
+	bool Run(const string& config);
+	bool Run();
 	bool Reload();
 	bool IsRunning();
 
 	/*
 	 * Implement from TcpServerObserver
 	 */
-	bool OnAccept(TcpServer *ts, Message *m);
+	/**
+	 * TcpServer回调
+	 */
+	bool OnAccept(TcpServer *ts, int fd, char* ip);
 	void OnRecvMessage(TcpServer *ts, Message *m);
 	void OnSendMessage(TcpServer *ts, Message *m);
 	void OnDisconnect(TcpServer *ts, int fd);
+	void OnClose(TcpServer *ts, int fd);
 	void OnTimeoutMessage(TcpServer *ts, Message *m);
 
 	/**

@@ -62,7 +62,7 @@ AdmirerSender::~AdmirerSender() {
 	}
 }
 
-void AdmirerSender::Run(const string& config) {
+bool AdmirerSender::Run(const string& config) {
 	if( config.length() > 0 ) {
 		mConfigFile = config;
 
@@ -71,10 +71,10 @@ void AdmirerSender::Run(const string& config) {
 			if( miDebugMode == 1 ) {
 				LogManager::LogSetFlushBuffer(0);
 			} else {
-				LogManager::LogSetFlushBuffer(5 * BUFFER_SIZE_1K * BUFFER_SIZE_1K);
+				LogManager::LogSetFlushBuffer(1 * BUFFER_SIZE_1K * BUFFER_SIZE_1K);
 			}
 
-			Run();
+			return Run();
 		} else {
 			printf("# Match Server can not load config file exit. \n");
 		}
@@ -82,11 +82,36 @@ void AdmirerSender::Run(const string& config) {
 	} else {
 		printf("# No config file can be use exit. \n");
 	}
+
+	return false;
 }
 
-void AdmirerSender::Run() {
+bool AdmirerSender::Run() {
 	/* log system */
 	LogManager::GetLogManager()->Start(1000, miLogLevel, mLogDir);
+
+	LogManager::GetLogManager()->Log(
+			LOG_WARNING,
+			"AdmirerSender::Run( "
+			"############## Admirer Sender ############## "
+			")"
+			);
+	LogManager::GetLogManager()->Log(
+			LOG_WARNING,
+			"AdmirerSender::Run( "
+			"Version : %s "
+			")",
+			VERSION_STRING
+			);
+	LogManager::GetLogManager()->Log(
+			LOG_WARNING,
+			"AdmirerSender::Run( "
+			"Build date : %s %s "
+			")",
+			__DATE__,
+			__TIME__
+			);
+
 	LogManager::GetLogManager()->Log(
 			LOG_MSG,
 			"AdmirerSender::Run( "
@@ -133,7 +158,7 @@ void AdmirerSender::Run() {
 	if( !bFlag ) {
 		printf("# Admirer Sender can not initialize database exit. \n");
 		LogManager::GetLogManager()->Log(LOG_STAT, "AdmirerSender::Run( Database Init fail )");
-		return;
+		return false;
 	}
 	LogManager::GetLogManager()->Log(LOG_STAT, "AdmirerSender::Run( Database Init OK )");
 
@@ -148,7 +173,7 @@ void AdmirerSender::Run() {
 	} else {
 		printf("# Admirer Sender can not start tcp server exit. \n");
 		LogManager::GetLogManager()->Log(LOG_STAT, "AdmirerSender::Run( TcpServer Init fail )");
-		return;
+		return false;
 	}
 
 	/* start send thread */
@@ -157,7 +182,7 @@ void AdmirerSender::Run() {
 		LogManager::GetLogManager()->Log(LOG_STAT, "AdmirerSender::Run( Create send thread OK )");
 	} else {
 		printf("# Admirer Sender can not create send thread exit. \n");
-		return;
+		return false;
 	}
 
 	mpStateThread = new KThread(mpStateRunnable);
@@ -165,7 +190,7 @@ void AdmirerSender::Run() {
 		LogManager::GetLogManager()->Log(LOG_STAT, "AdmirerSender::Run( Create state thread OK )");
 	} else {
 		printf("# Admirer Sender can not create state thread exit. \n");
-		return;
+		return false;
 	}
 
 	mDBManager.SyncForce();
@@ -176,10 +201,7 @@ void AdmirerSender::Run() {
 	printf("# AdmirerSender start OK. \n");
 	LogManager::GetLogManager()->Log(LOG_WARNING, "AdmirerSender::Run( Init OK )");
 
-	while( true ) {
-		/* do nothing here */
-		sleep(5);
-	}
+	return true;
 }
 
 bool AdmirerSender::Reload() {
@@ -228,6 +250,7 @@ bool AdmirerSender::Reload() {
 				mDbLady[i].miSiteId = atoi(conf.GetPrivate(domain, "SITEID", "-1").c_str());
 				mDbLady[i].miOverValue = atoi(conf.GetPrivate(domain, "OVERVALUE", "0").c_str());
 				mDbLady[i].mPostfix = conf.GetPrivate(domain, "DBPOSTFIX", "");
+				mDbLady[i].mMember = conf.GetPrivate(domain, "MEMBER", "");
 			}
 
 			// LOG
@@ -278,8 +301,31 @@ bool AdmirerSender::IsRunning() {
 /**
  * New request
  */
-bool AdmirerSender::OnAccept(TcpServer *ts, Message *m) {
+bool AdmirerSender::OnAccept(TcpServer *ts, int fd, char* ip) {
 	return true;
+}
+
+void AdmirerSender::OnDisconnect(TcpServer *ts, int fd) {
+	LogManager::GetLogManager()->Log(LOG_STAT, "AdmirerSender::OnDisconnect( "
+			"tid : %d, "
+			"fd : [%d], "
+			"start "
+			")",
+			(int)syscall(SYS_gettid),
+			fd
+			);
+	LogManager::GetLogManager()->Log(LOG_STAT, "AdmirerSender::OnDisconnect( "
+			"tid : %d, "
+			"fd : [%d], "
+			"end "
+			")",
+			(int)syscall(SYS_gettid),
+			fd
+			);
+}
+
+void AdmirerSender::OnClose(TcpServer *ts, int fd)  {
+
 }
 
 void AdmirerSender::OnRecvMessage(TcpServer *ts, Message *m) {
@@ -304,13 +350,6 @@ void AdmirerSender::OnRecvMessage(TcpServer *ts, Message *m) {
 			mCountMutex.unlock();
 			ret = HandleRecvMessage(m, sm);
 			if( 0 != ret ) {
-				mCountMutex.lock();
-				mResponed += sm->totaltime;
-				if( ret == 1 ) {
-					mHit++;
-				}
-				mCountMutex.unlock();
-
 				// Process finish, send respond
 				ts->SendMessageByQueue(sm);
 			} else {
@@ -358,11 +397,6 @@ void AdmirerSender::OnTimeoutMessage(TcpServer *ts, Message *m) {
 		sm->fd = m->fd;
 		sm->wr = m->wr;
 
-		mCountMutex.lock();
-		mTotal++;
-		mResponed += sm->totaltime;
-		mCountMutex.unlock();
-
 		HandleTimeoutMessage(m, sm);
 		// Process finish, send respond
 		ts->SendMessageByQueue(sm);
@@ -383,28 +417,6 @@ void AdmirerSender::OnTimeoutMessage(TcpServer *ts, Message *m) {
 	LogManager::GetLogManager()->Log(LOG_STAT, "AdmirerSender::OnTimeoutMessage( tid : %d, m->fd : [%d], end )", (int)syscall(SYS_gettid), m->fd);
 }
 
-/**
- * OnDisconnect
- */
-void AdmirerSender::OnDisconnect(TcpServer *ts, int fd) {
-	LogManager::GetLogManager()->Log(LOG_STAT, "AdmirerSender::OnDisconnect( "
-			"tid : %d, "
-			"fd : [%d], "
-			"start "
-			")",
-			(int)syscall(SYS_gettid),
-			fd
-			);
-	LogManager::GetLogManager()->Log(LOG_STAT, "AdmirerSender::OnDisconnect( "
-			"tid : %d, "
-			"fd : [%d], "
-			"end "
-			")",
-			(int)syscall(SYS_gettid),
-			fd
-			);
-}
-
 int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 	int ret = -1;
 	int code = 200;
@@ -419,6 +431,18 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 		return ret;
 	}
 
+	LogManager::GetLogManager()->Log(
+			LOG_WARNING,
+			"AdmirerSender::HandleRecvMessage( "
+			"tid : %d, "
+			"m->fd: [%d], "
+			"request : \n%s\n"
+			")",
+			(int)syscall(SYS_gettid),
+			m->fd,
+			m->buffer
+			);
+
 	DataHttpParser dataHttpParser;
 	if ( DiffGetTickCount(m->starttime, GetTickCount()) < miTimeout * 1000 ) {
 		if( m->buffer != NULL ) {
@@ -430,27 +454,23 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 
 	if( ret == 1 ) {
 		ret = -1;
-		const char* pPath = dataHttpParser.GetPath();
+		const char* pPath = dataHttpParser.GetPath().c_str();
 		HttpType type = dataHttpParser.GetType();
-
-		LogManager::GetLogManager()->Log(
-				LOG_STAT,
-				"AdmirerSender::HandleRecvMessage( "
-				"tid : %d, "
-				"m->fd: [%d], "
-				"type : %d, "
-				"pPath : %s "
-				")",
-				(int)syscall(SYS_gettid),
-				m->fd,
-				type,
-				pPath
-				);
 
 		if( type == GET ) {
 			if( strcmp(pPath, "/SYNCLADYLIST") == 0 ) {
 				// 增量获取发送女士
-				const char* pSiteId = dataHttpParser.GetParam("SITEID");
+				LogManager::GetLogManager()->Log(
+						LOG_WARNING,
+						"AdmirerSender::HandleRecvMessage( "
+						"tid : %d, "
+						"[增量获取发送女士] "
+						")",
+						(int)syscall(SYS_gettid),
+						m->fd
+						);
+
+				const char* pSiteId = dataHttpParser.GetParam("SITEID").c_str();
 				if( pSiteId != NULL ) {
 					SyncLadyList(pSiteId, m);
 
@@ -461,7 +481,7 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 				param = writer.write(rootSend);
 
 			} else if( strcmp(pPath, "/GETAGENTSENDSTATUS") == 0 ) {
-				const char* pAgentId = dataHttpParser.GetParam("AGENTID");
+				const char* pAgentId = dataHttpParser.GetParam("AGENTID").c_str();
 				if( pAgentId != NULL ) {
 					Json::Value statusNode;
 					GetAgentSendStatus(statusNode, (char*)pAgentId, m);
@@ -473,6 +493,16 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 				param = writer.write(rootSend);
 
 			} else if( strcmp(pPath, "/CLEARLETTERSENDLIST") == 0 ) {
+				LogManager::GetLogManager()->Log(
+						LOG_WARNING,
+						"AdmirerSender::HandleRecvMessage( "
+						"tid : %d, "
+						"[清空发送女士] "
+						")",
+						(int)syscall(SYS_gettid),
+						m->fd
+						);
+
 				ClearLetterSendList(m);
 				rootSend["ret"] = 1;
 				ret = 1;
@@ -489,24 +519,25 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 			sprintf(reason, "Not Found");
 			param = "404 Not Found";
 		}
+	} else {
+		param = writer.write(rootSend);
 	}
 
-	sm->totaltime = GetTickCount() - m->starttime;
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_WARNING,
 			"AdmirerSender::HandleRecvMessage( "
 			"tid : %d, "
 			"m->fd: [%d], "
-			"iTotaltime : %u ms, "
-			"ret : %d "
+			"ret : %d, "
+			"respond : \n%s\n"
 			")",
 			(int)syscall(SYS_gettid),
 			m->fd,
-			sm->totaltime,
-			ret
+			ret,
+			param.c_str()
 			);
 
-	snprintf(sm->buffer, MAXLEN - 1, "HTTP/1.1 %d %s\r\nContext-Length:%d\r\n\r\n%s",
+	snprintf(sm->buffer, MAX_BUFFER_LEN - 1, "HTTP/1.1 %d %s\r\nContext-Length:%d\r\n\r\n%s",
 			code,
 			reason,
 			(int)param.length(),
@@ -526,23 +557,20 @@ int AdmirerSender::HandleTimeoutMessage(Message *m, Message *sm) {
 	if( m == NULL ) {
 		return ret;
 	}
-
-	sm->totaltime = GetTickCount() - m->starttime;
+	printf("#AdmirerSender::HandleTimeoutMessage( buffer : %s )", m->buffer);
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_WARNING,
 			"AdmirerSender::HandleTimeoutMessage( "
 			"tid : %d, "
-			"m->fd: [%d], "
-			"iTotaltime : %u ms "
+			"m->fd: [%d] "
 			")",
 			(int)syscall(SYS_gettid),
-			m->fd,
-			sm->totaltime
+			m->fd
 			);
 
 	string param = writer.write(rootSend);
 
-	snprintf(sm->buffer, MAXLEN - 1, "HTTP/1.1 200 ok\r\nContext-Length:%d\r\n\r\n%s",
+	snprintf(sm->buffer, MAX_BUFFER_LEN - 1, "HTTP/1.1 200 ok\r\nContext-Length:%d\r\n\r\n%s",
 			(int)param.length(), param.c_str());
 	sm->len = strlen(sm->buffer);
 

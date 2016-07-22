@@ -9,7 +9,6 @@
 #define DATAPARSER_H_
 
 #include "IDataParser.h"
-
 #include <string.h>
 
 class DataParser : public IDataParser {

@@ -42,6 +42,7 @@ typedef struct DBStruct {
 		miSiteId = -1;
 		miOverValue = 0;
 		mPostfix = "";
+		mMember = "";
 		miSyncTime = 0;
 		miSyncIndex = 0;
 		mbSyncForce = false;
@@ -57,6 +58,7 @@ typedef struct DBStruct {
 		miSiteId = item.miSiteId;
 		miOverValue = item.miOverValue;
 		mPostfix = item.mPostfix;
+		mMember = item.mMember;
 		miSyncTime = item.miSyncTime;
 		miSyncIndex = item.miSyncIndex;
 		mbSyncForce = item.miSyncIndex;
@@ -72,6 +74,7 @@ typedef struct DBStruct {
 		miSiteId = item.miSiteId;
 		miOverValue = item.miOverValue;
 		mPostfix = item.mPostfix;
+		mMember = item.mMember;
 		miSyncTime = item.miSyncTime;
 		miSyncIndex = item.miSyncIndex;
 		mbSyncForce = item.miSyncIndex;
@@ -87,6 +90,7 @@ typedef struct DBStruct {
 	int miSiteId;
 	int miOverValue;
 	string mPostfix;
+	string mMember;
 	int miSyncTime;
 	int miSyncIndex;
 
@@ -292,6 +296,7 @@ private:
 			const Man& man,
 			const Lady& lady,
 			string admireBody,
+			const AdmireTemplate& admireTemplate,
 			unsigned long long iInsertId = 0
 			);
 
@@ -409,12 +414,12 @@ private:
 	/**
 	 * 在内存表更新男士能否收信
 	 */
-	bool UpdateManCanSend(const Man& man, int iSiteId, bool bCanSend);
+	bool UpdateManCanRecv(const Man& man, int iSiteId, bool bCanRecv);
 
 	/**
 	 * 在内存表更新男士收信数量
 	 */
-	bool UpdateManSent(const Man& man, int iSiteId);
+	bool UpdateManRecv(const Man& man, int iSiteId);
 
 	/**
 	 * 在内存表更新女士发信排序

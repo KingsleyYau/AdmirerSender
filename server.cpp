@@ -17,8 +17,6 @@
 #include <string>
 using namespace std;
 
-#define VERSION_STRING "1.0.2"
-
 string sConf = "";  // 配置文件
 
 bool Parse(int argc, char *argv[]);
@@ -38,12 +36,18 @@ int main(int argc, char *argv[]) {
 
 	Parse(argc, argv);
 
-	AdmirerSender sender;
+	bool bFlag = false;
+	AdmirerSender server;
 	if( sConf.length() > 0 ) {
-		sender.Run(sConf);
+		bFlag = server.Run(sConf);
 	} else {
 		printf("# Usage : ./admirersender [ -f <config file> ] \n");
-		sender.Run("/etc/admirersender.config");
+		bFlag = server.Run("/etc/admirersender.config");
+	}
+
+	while( bFlag && server.IsRunning() ) {
+		/* do nothing here */
+		sleep(5);
 	}
 
 	return EXIT_SUCCESS;

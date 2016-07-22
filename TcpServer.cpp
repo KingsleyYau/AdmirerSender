@@ -8,6 +8,9 @@
 
 #include "TcpServer.h"
 
+#include <common/Arithmetic.hpp>
+#include <common/TimeProc.hpp>
+
 //static struct ev_loop *gLoop = NULL;
 
 void accept_callback(struct ev_loop *loop, ev_io *w, int revents);
@@ -326,10 +329,9 @@ protected:
 					);
 
 			/* handle data here */
-			int len = m->len;
 			m->index = mIndex;
 
-			if( len > 0 ) {
+			if( m->type == MessageTypeRecv ) {
 				/* recv message ok */
 				mContainer->OnRecvMessage(m);
 			} else {
@@ -361,14 +363,25 @@ TcpServer::TcpServer() {
 	mLoop = NULL;
 	mIsRunning = false;
 	mpTcpServerObserver = NULL;
-
+	mServer = 0;
+	miMaxConnection = 0;
 	mHandleSize = 0;
-	mTotalRecvTime = 0;
-	mTotalSendTime = 0;
-	mTotalTime = 0;
+
+	mpMainThread = NULL;
+
+	miMaxThreadHandle = 0;
+	mpHandleRunnable = NULL;
+	mpHandleThread = NULL;
 
 	mpMainRunnable = new MainRunnable(this);
+
 	mpSendRunnable = new SendRunnable(this);
+	mpSendThread = NULL;
+
+	mpHandlingMessageCount = NULL;
+	mpCloseRecv = NULL;
+	mpPacketSeqRecv = NULL;
+	mpPacketSeqSend = NULL;
 
 }
 
@@ -388,12 +401,15 @@ TcpServer::~TcpServer() {
 }
 
 bool TcpServer::Start(int maxConnection, int port, int maxThreadHandle) {
-	mTotalRecvTime = 0;
-	mTotalSendTime = 0;
+	if( mIsRunning ) {
+		return false;
+	}
+
+	printf("# TcpServer starting... \n");
+
 	miMaxThreadHandle = maxThreadHandle;
 	miMaxConnection = maxConnection;
 
-	printf("# TcpServer start... \n");
 	LogManager::GetLogManager()->Log(
 			LOG_MSG,
 			"TcpServer::Start( "
@@ -408,7 +424,7 @@ bool TcpServer::Start(int maxConnection, int port, int maxThreadHandle) {
 	struct sockaddr_in ac_addr;
 	if ((mServer = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
 		LogManager::GetLogManager()->Log(LOG_ERR_SYS, "TcpServer::Start( Create socket error )");
-		printf("# Create socket error \n");
+		printf("# Create socket error! \n");
 		return -1;
 	}
 
@@ -422,18 +438,20 @@ bool TcpServer::Start(int maxConnection, int port, int maxThreadHandle) {
 
 	if ( bind(mServer, (struct sockaddr *) &ac_addr, sizeof(struct sockaddr))== -1 ) {
 		LogManager::GetLogManager()->Log(LOG_ERR_SYS, "TcpServer::Start( Bind socket error )");
-		printf("# Bind socket error \n");
+		printf("# Bind socket error! \n");
 		return false;
 	}
 
 	if ( listen(mServer, 1024) == -1 ) {
 		LogManager::GetLogManager()->Log(LOG_ERR_SYS, "TcpServer::Start( Listen socket error )");
-		printf("# Listen socket error \n");
+		printf("# Listen socket error! \n");
 		return false;
 	}
 
 	mpCloseRecv = new bool[2 * maxConnection];
 	mpHandlingMessageCount = new int[2 * maxConnection];
+	mpPacketSeqRecv = new int[2 * maxConnection];
+	mpPacketSeqSend = new int[2 * maxConnection];
 
 	/* create watchers */
 	for(int i = 0 ; i < 2 * maxConnection; i++) {
@@ -444,17 +462,12 @@ bool TcpServer::Start(int maxConnection, int port, int maxThreadHandle) {
 	}
 	LogManager::GetLogManager()->Log(LOG_STAT, "TcpServer::Start( Create watchers ok, mWatcherList : %d )", mWatcherList.Size());
 
-	for(int i = 0; i < maxConnection; i++) {
+	for(int i = 0; i < 10000; i++) {
 		/* create idle buffers */
 		Message *m = new Message();
 		mIdleMessageList.PushBack(m);
 	}
 	LogManager::GetLogManager()->Log(LOG_STAT, "TcpServer::Start( Create idle buffers ok )");
-
-//	/* init send message list */
-//	mpSendMessageList = new MessageList[2 * maxConnection];
-//	LogManager::GetLogManager()->Log(LOG_STAT, "TcpServer::Start( Init send message list ok )");
-//	printf("# Init send message list ok \n");
 
 	mIsRunning = true;
 
@@ -464,7 +477,6 @@ bool TcpServer::Start(int maxConnection, int port, int maxThreadHandle) {
 	mpMainThread = new KThread(mpMainRunnable);
 	if( mpMainThread->start() != 0 ) {
 		LogManager::GetLogManager()->Log(LOG_STAT, "TcpServer::Start( Create main thread ok )");
-//		printf("# Create main thread ok \n");
 	}
 
 	/* start handle thread */
@@ -475,7 +487,6 @@ bool TcpServer::Start(int maxConnection, int port, int maxThreadHandle) {
 		mpHandleThread[i] = new KThread(mpHandleRunnable[i]);
 		if( mpHandleThread[i]->start() != 0 ) {
 			LogManager::GetLogManager()->Log(LOG_STAT, "TcpServer::Start( Create handle thread[%d] ok )", i);
-//			printf("# Create handle thread[%d] ok \n", i);
 		}
 	}
 
@@ -483,15 +494,20 @@ bool TcpServer::Start(int maxConnection, int port, int maxThreadHandle) {
 	mpSendThread = new KThread(mpSendRunnable);
 	if( mpSendThread->start() != 0 ) {
 		LogManager::GetLogManager()->Log(LOG_STAT, "TcpServer::Start( Create send thread ok )");
-//		printf("# Create send thread ok \n");
 	}
+	LogManager::GetLogManager()->Log(LOG_STAT, "TcpServer::Start( start ok )");
 	printf("# TcpServer start OK. \n");
 	return true;
 }
 
 bool TcpServer::Stop() {
-	/* stop log thread */
-	mIsRunning = false;
+	if( mIsRunning ) {
+		mIsRunning = false;
+	} else {
+		return false;
+	}
+
+	printf("# TcpServer stopping... \n");
 
 	/* release main thread */
 	if( mpMainThread ) {
@@ -500,13 +516,19 @@ bool TcpServer::Stop() {
 	}
 
 	/* release handle thread */
-	for( int i = 0; i < miMaxThreadHandle; i++ ) {
-		mpHandleThread[i]->stop();
-		delete mpHandleRunnable[i];
-		delete mpHandleThread[i];
+	if( mpHandleThread != NULL && mpHandleThread != NULL ) {
+		for( int i = 0; i < miMaxThreadHandle; i++ ) {
+			if( mpHandleThread[i] != NULL ) {
+				mpHandleThread[i]->stop();
+				delete mpHandleThread[i];
+			}
+			if( mpHandleRunnable[i] != NULL ) {
+				delete mpHandleRunnable[i];
+			}
+		}
+		delete mpHandleThread;
+		delete mpHandleRunnable;
 	}
-	delete mpHandleThread;
-	delete mpHandleRunnable;
 
 	close(mServer);
 
@@ -516,6 +538,14 @@ bool TcpServer::Stop() {
 
 	if( mpHandlingMessageCount != NULL ) {
 		delete mpHandlingMessageCount;
+	}
+
+	if( mpPacketSeqRecv != NULL ) {
+		delete mpPacketSeqRecv;
+	}
+
+	if( mpPacketSeqSend != NULL ) {
+		delete mpPacketSeqSend;
 	}
 
 	Message *m;
@@ -533,6 +563,8 @@ bool TcpServer::Stop() {
 	if( mLoop ) {
 		ev_loop_destroy(mLoop);
 	}
+
+	printf("# TcpServer stop OK. \n");
 
 	return true;
 }
@@ -559,7 +591,7 @@ void TcpServer::Accept_Callback(ev_io *w, int revents) {
 			revents
 			);
 
-	int client;
+	int client = 0;
 	struct sockaddr_in addr;
 	socklen_t iAddrLen = sizeof(struct sockaddr);
 	while ( (client = accept(w->fd, (struct sockaddr *)&addr, &iAddrLen)) < 0 ) {
@@ -575,9 +607,10 @@ void TcpServer::Accept_Callback(ev_io *w, int revents) {
 					w->fd
 					);
 			continue;
+
 		} else {
 			LogManager::GetLogManager()->Log(
-					LOG_STAT,
+					LOG_WARNING,
 					"TcpServer::Accept_Callback( "
 					"tid : %d, "
 					"fd : [%d], "
@@ -590,10 +623,22 @@ void TcpServer::Accept_Callback(ev_io *w, int revents) {
 		}
 	}
 
+	if( client == 0 ) {
+		return;
+	}
+
 	mCloseMutex.lock();
 	mpCloseRecv[client] = false;
 	mpHandlingMessageCount[client] = 0;
 	mCloseMutex.unlock();
+
+	mpPacketSeqRecvMutex.lock();
+	mpPacketSeqRecv[client] = 0;
+	mpPacketSeqRecvMutex.unlock();
+
+	mpPacketSeqSendMutex.lock();
+	mpPacketSeqSend[client] = 0;
+	mpPacketSeqSendMutex.unlock();
 
 	int iFlag = 1;
 	setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &iFlag, sizeof(iFlag));
@@ -603,25 +648,39 @@ void TcpServer::Accept_Callback(ev_io *w, int revents) {
 	int nZero = 0;
 	setsockopt(client, SOL_SOCKET, SO_SNDBUF, &nZero, sizeof(nZero));
 
-	Message *m = GetIdleMessageList()->PopFront();
-	if( m == NULL ) {
-		LogManager::GetLogManager()->Log(LOG_WARNING, "TcpServer::Accept_Callback( "
-				"tid : %d, "
-				"accept client fd : [%d], "
-				"m == NULL "
-				")",
-				(int)syscall(SYS_gettid),
-				client
-				);
-		OnDisconnect(client, NULL);
-		return;
-	}
+    /*deal with the tcp keepalive
+      iKeepAlive = 1 (check keepalive)
+      iKeepIdle = 600 (active keepalive after socket has idled for 10 minutes)
+      KeepInt = 60 (send keepalive every 1 minute after keepalive was actived)
+      iKeepCount = 3 (send keepalive 3 times before disconnect from peer)
+     */
+    int iKeepAlive = 1, iKeepIdle = 60, KeepInt = 20, iKeepCount = 3;
+    setsockopt(client, SOL_SOCKET, SO_KEEPALIVE, (void*)&iKeepAlive, sizeof(iKeepAlive));
+    setsockopt(client, IPPROTO_TCP, TCP_KEEPIDLE, (void*)&iKeepIdle, sizeof(iKeepIdle));
+    setsockopt(client, IPPROTO_TCP, TCP_KEEPINTVL, (void *)&KeepInt, sizeof(KeepInt));
+    setsockopt(client, IPPROTO_TCP, TCP_KEEPCNT, (void *)&iKeepCount, sizeof(iKeepCount));
 
-	m->Reset();
-	m->fd = client;
+	char* ip = inet_ntoa(addr.sin_addr);
+
+//	Message *m = GetIdleMessageList()->PopFront();
+//	if( m == NULL ) {
+//		LogManager::GetLogManager()->Log(LOG_WARNING, "TcpServer::Accept_Callback( "
+//				"tid : %d, "
+//				"accept client fd : [%d], "
+//				"m == NULL "
+//				")",
+//				(int)syscall(SYS_gettid),
+//				client
+//				);
+//		OnDisconnect(client, NULL);
+//		return;
+//	}
+
+//	m->Reset();
+//	m->fd = client;
 
 	/* Add Client */
-	if( OnAccept(m) ) {
+	if( OnAccept(client, ip) ) {
 		WatcherList *watcherList = GetWatcherList();
 		if( !watcherList->Empty() ) {
 			/* watch recv event for client */
@@ -642,7 +701,7 @@ void TcpServer::Accept_Callback(ev_io *w, int revents) {
 			ev_io_start(mLoop, watcher);
 			UnLockWatcherList();
 
-			GetIdleMessageList()->PushBack(m);
+//			GetIdleMessageList()->PushBack(m);
 		} else {
 			LogManager::GetLogManager()->Log(
 					LOG_WARNING,
@@ -653,11 +712,13 @@ void TcpServer::Accept_Callback(ev_io *w, int revents) {
 					(int)syscall(SYS_gettid)
 					);
 			Disconnect(client);
-			OnDisconnect(client, m);
+			OnDisconnect(client, NULL);
+
 		}
 	} else {
 		Disconnect(client);
-		OnDisconnect(client, m);
+		OnDisconnect(client, NULL);
+
 	}
 
 	LogManager::GetLogManager()->Log(
@@ -691,7 +752,6 @@ void TcpServer::Recv_Callback(ev_io *w, int revents) {
 	/* something can be recv here */
 	int fd = w->fd;
 
-	unsigned long start = GetTickCount();
 	do {
 		Message *m = GetIdleMessageList()->PopFront();
 		if( m == NULL ) {
@@ -730,7 +790,7 @@ void TcpServer::Recv_Callback(ev_io *w, int revents) {
 			return;
 		}
 
-		int ret = recv(fd, buffer, MAXLEN - 1, 0);
+		int ret = recv(fd, buffer, MAX_BUFFER_LEN - 1, 0);
 		if( ret > 0 ) {
 			*(buffer + ret) = '\0';
 			LogManager::GetLogManager()->Log(
@@ -746,7 +806,7 @@ void TcpServer::Recv_Callback(ev_io *w, int revents) {
 
 			/* push this message into handle queue */
 			m->len = ret;
-			m->type = 0;
+			m->type = MessageTypeRecv;
 			m->starttime = GetTickCount();
 
 			if ( GetHandleSize() > 0 &&
@@ -758,12 +818,18 @@ void TcpServer::Recv_Callback(ev_io *w, int revents) {
 				mCloseMutex.lock();
 				mpHandlingMessageCount[fd]++;
 				mCloseMutex.unlock();
+
+				mpPacketSeqRecvMutex.lock();
+				m->seq = mpPacketSeqRecv[fd]++;
+				mpPacketSeqRecvMutex.unlock();
+
 				GetHandleMessageList()->PushBack(m);
 			}
 
-			if( ret != MAXLEN - 1 ) {
+			if( ret != MAX_BUFFER_LEN - 1 ) {
 				break;
 			}
+
 		} else if( ret == 0 ) {
 			LogManager::GetLogManager()->Log(
 					LOG_STAT,
@@ -776,6 +842,7 @@ void TcpServer::Recv_Callback(ev_io *w, int revents) {
 					fd);
 			OnDisconnect(fd, m);
 			break;
+
 		} else {
 			if(errno == EAGAIN || errno == EWOULDBLOCK) {
 				LogManager::GetLogManager()->Log(
@@ -788,6 +855,7 @@ void TcpServer::Recv_Callback(ev_io *w, int revents) {
 						);
 				GetIdleMessageList()->PushBack(m);
 				break;
+
 			} else {
 				LogManager::GetLogManager()->Log(
 						LOG_STAT,
@@ -801,10 +869,10 @@ void TcpServer::Recv_Callback(ev_io *w, int revents) {
 						);
 				OnDisconnect(fd, m);
 				break;
+
 			}
 		}
 	} while( true );
-	AddRecvTime(GetTickCount() - start);
 
 	LogManager::GetLogManager()->Log(
 			LOG_STAT,
@@ -855,7 +923,6 @@ void TcpServer::SendMessageByQueue(Message *m) {
 			"TcpServer::SendMessageByQueue( "
 			"tid : %d, "
 			"m->fd : [%d] "
-			"start"
 			")",
 			(int)syscall(SYS_gettid),
 			m->fd
@@ -865,6 +932,10 @@ void TcpServer::SendMessageByQueue(Message *m) {
 	mpHandlingMessageCount[m->fd]++;
 	mCloseMutex.unlock();
 
+	mpPacketSeqSendMutex.lock();
+	m->seq = mpPacketSeqSend[m->fd]++;
+	mpPacketSeqSendMutex.unlock();
+
 	GetSendImmediatelyMessageList()->PushBack(m);
 
 	LogManager::GetLogManager()->Log(
@@ -872,43 +943,44 @@ void TcpServer::SendMessageByQueue(Message *m) {
 			"TcpServer::SendMessageByQueue( "
 			"tid : %d, "
 			"m->fd : [%d] "
-			"end"
+			"end "
 			")",
 			(int)syscall(SYS_gettid),
 			m->fd
 			);
+
 }
 
 void TcpServer::SendMessageImmediately(Message *m) {
-	LogManager::GetLogManager()->Log(
-			LOG_STAT,
-			"TcpServer::SendMessageImmediately( "
-			"tid : %d, "
-			"m->fd : [%d], "
-			"start "
-			")",
-			(int)syscall(SYS_gettid),
-			m->fd
-			);
-
 	char *buffer = m->buffer;
 	int len = m->len;
 	int index = 0;
 	int fd = m->fd;
-
-	unsigned int start = GetTickCount();
 
 	LogManager::GetLogManager()->Log(
 			LOG_MSG,
 			"TcpServer::SendMessageImmediately( "
 			"tid : %d, "
 			"fd : [%d], "
-			"message ( len : %d ) : [\n%s\n]"
+			"buffer( len : %d ) "
 			")",
 			(int)syscall(SYS_gettid),
 			fd,
-			m->len,
-			buffer + index
+			len
+			);
+
+	Arithmetic ari;
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"TcpServer::SendMessageImmediately( "
+			"tid : %d, "
+			"fd : [%d], "
+			"buffer( len : %d ) : [\n%s\n]"
+			")",
+			(int)syscall(SYS_gettid),
+			fd,
+			len,
+			ari.AsciiToHexWithSep(buffer, len).c_str()
 			);
 	do {
 		int ret = send(fd, buffer + index, len - index, 0);
@@ -975,18 +1047,8 @@ void TcpServer::SendMessageImmediately(Message *m) {
 		}
 	} while(true);
 
-	AddSendTime(GetTickCount() - start);
-
 	CloseSocketIfNeedByHandleThread(m->fd);
 
-	LogManager::GetLogManager()->Log(LOG_STAT, "TcpServer::SendMessageImmediately( "
-				"tid : %d, "
-				"m->fd : [%d] "
-				"end "
-				")",
-				(int)syscall(SYS_gettid),
-				m->fd
-				);
 }
 
 void TcpServer::SendAllMessageImmediately() {
@@ -1005,25 +1067,14 @@ void TcpServer::Disconnect(int fd) {
 			LOG_MSG,
 			"TcpServer::Disconnect( "
 			"tid : %d, "
-			"fd : [%d], "
-			"start "
+			"fd : [%d] "
 			")",
 			(int)syscall(SYS_gettid),
 			fd
 			);
 
-	shutdown(fd, SHUT_RDWR);
+	shutdown(fd, SHUT_RD);
 
-	LogManager::GetLogManager()->Log(
-			LOG_STAT,
-			"TcpServer::Disconnect( "
-			"tid : %d, "
-			"fd : [%d], "
-			"exit "
-			")",
-			(int)syscall(SYS_gettid),
-			fd
-			);
 }
 
 void TcpServer::StopEvio(ev_io *w) {
@@ -1046,6 +1097,7 @@ void TcpServer::StopEvio(ev_io *w) {
 }
 
 void TcpServer::CloseSocketIfNeedByHandleThread(int fd) {
+	bool bClose = false;
 	mCloseMutex.lock();
 	--mpHandlingMessageCount[fd];
 
@@ -1074,10 +1126,20 @@ void TcpServer::CloseSocketIfNeedByHandleThread(int fd) {
 							(int)syscall(SYS_gettid),
 							fd
 							);
-			close(fd);
+
+			bClose = true;
+
 		}
 	}
 	mCloseMutex.unlock();
+
+	if( bClose ) {
+		if( mpTcpServerObserver != NULL ) {
+			mpTcpServerObserver->OnClose(this, fd);
+		}
+
+		close(fd);
+	}
 }
 
 MessageList *TcpServer::GetIdleMessageList() {
@@ -1125,8 +1187,7 @@ void TcpServer::OnDisconnect(int fd, Message *m) {
 			LOG_MSG,
 			"TcpServer::OnDisconnect( "
 			"tid : %d, "
-			"fd : [%d], "
-			"start "
+			"fd : [%d] "
 			")",
 			(int)syscall(SYS_gettid),
 			fd
@@ -1141,6 +1202,7 @@ void TcpServer::OnDisconnect(int fd, Message *m) {
 		mpTcpServerObserver->OnDisconnect(this, fd);
 	}
 
+	bool bClose = false;
 	mCloseMutex.lock();
 	LogManager::GetLogManager()->Log(
 					LOG_STAT,
@@ -1154,6 +1216,7 @@ void TcpServer::OnDisconnect(int fd, Message *m) {
 					fd,
 					mpHandlingMessageCount[fd]
 					);
+
 	if( mpHandlingMessageCount[fd] == 0 ) {
 		LogManager::GetLogManager()->Log(
 						LOG_MSG,
@@ -1167,42 +1230,47 @@ void TcpServer::OnDisconnect(int fd, Message *m) {
 						fd,
 						mpHandlingMessageCount[fd]
 						);
-		close(fd);
+
+		bClose = true;
+
 	} else {
 		mpCloseRecv[fd] = true;
+
 	}
 	mCloseMutex.unlock();
+
+	if( bClose ) {
+		if( mpTcpServerObserver != NULL ) {
+			mpTcpServerObserver->OnClose(this, fd);
+		}
+
+		close(fd);
+	}
 
 	if( m != NULL ) {
 		mIdleMessageList.PushBack(m);
 	}
 
+}
+
+bool TcpServer::OnAccept(int fd, char* ip) {
 	LogManager::GetLogManager()->Log(
-			LOG_STAT,
-			"TcpServer::OnDisconnect( "
+			LOG_MSG,
+			"TcpServer::OnAccept( "
 			"tid : %d, "
-			"fd : [%d], "
-			"end "
+			"fd : [%d] "
 			")",
 			(int)syscall(SYS_gettid),
 			fd
 			);
-}
 
-bool TcpServer::OnAccept(Message *m) {
-	LogManager::GetLogManager()->Log(LOG_MSG, "TcpServer::OnAccept( "
-				"tid : %d, "
-				"m->fd : [%d] "
-				")",
-				(int)syscall(SYS_gettid),
-				m->fd
-				);
+	bool bFlag = true;
 
 	if( mpTcpServerObserver != NULL ) {
-		mpTcpServerObserver->OnAccept(this, m);
+		bFlag = mpTcpServerObserver->OnAccept(this, fd, ip);
 	}
 
-	return true;
+	return bFlag;
 }
 
 void TcpServer::OnRecvMessage(Message *m) {
@@ -1211,17 +1279,28 @@ void TcpServer::OnRecvMessage(Message *m) {
 			"TcpServer::OnRecvMessage( "
 			"tid : %d, "
 			"m->fd : [%d], "
-			"mTotalRecvTime : %u ms, "
-			"mTotalTime : %u ms, "
-			"message( len : %d ) : [\n%s\n], "
-			"start "
+			"m->seq : %d, "
+			"len : %d "
 			")",
 			(int)syscall(SYS_gettid),
 			m->fd,
-			mTotalRecvTime,
-			mTotalTime,
-			m->len,
-			m->buffer
+			m->seq,
+			m->len
+			);
+
+	Arithmetic ari;
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"TcpServer::OnRecvMessage( "
+			"tid : %d, "
+			"m->fd : [%d], "
+			"m->seq : %d, "
+			"buffer : [\n%s\n] "
+			")",
+			(int)syscall(SYS_gettid),
+			m->fd,
+			m->seq,
+			ari.AsciiToHexWithSep(m->buffer, m->len).c_str()
 			);
 
 	if( mpTcpServerObserver != NULL ) {
@@ -1230,20 +1309,6 @@ void TcpServer::OnRecvMessage(Message *m) {
 
 	CloseSocketIfNeedByHandleThread(m->fd);
 
-	LogManager::GetLogManager()->Log(
-			LOG_STAT,
-			"TcpServer::OnRecvMessage( "
-			"tid : %d, "
-			"m->fd : [%d], "
-			"mTotalRecvTime : %u ms, "
-			"mTotalTime : %u ms, "
-			"end "
-			")",
-			(int)syscall(SYS_gettid),
-			m->fd,
-			mTotalRecvTime,
-			mTotalTime
-			);
 }
 
 void TcpServer::OnSendMessage(Message *m) {
@@ -1251,12 +1316,10 @@ void TcpServer::OnSendMessage(Message *m) {
 			LOG_MSG,
 			"TcpServer::OnSendMessage( "
 			"tid : %d, "
-			"m->fd : [%d], "
-			"mTotalTime : %u ms "
+			"m->fd : [%d] "
 			")",
 			(int)syscall(SYS_gettid),
-			m->fd,
-			mTotalSendTime
+			m->fd
 			);
 
 	if( mpTcpServerObserver != NULL ) {
@@ -1274,18 +1337,19 @@ void TcpServer::OnTimeoutMessage(Message *m) {
 			(int)syscall(SYS_gettid),
 			m->fd
 			);
+
 	if( mpTcpServerObserver != NULL ) {
 		mpTcpServerObserver->OnTimeoutMessage(this, m);
 	}
 }
 
-void TcpServer::AddRecvTime(unsigned long time) {
-	mTotalRecvTime += time;
-}
-
-void TcpServer::AddSendTime(unsigned long time) {
-	mTotalSendTime += time;
-}
+//void TcpServer::AddRecvTime(unsigned long time) {
+//	mTotalRecvTime += time;
+//}
+//
+//void TcpServer::AddSendTime(unsigned long time) {
+//	mTotalSendTime += time;
+//}
 
 void TcpServer::LockWatcherList() {
 	mWatcherListMutex.lock();

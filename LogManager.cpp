@@ -84,11 +84,14 @@ LogManager *LogManager::GetLogManager() {
 LogManager::LogManager() {
 	// TODO Auto-generated constructor stub
 	mIsRunning = false;
+	mpLogThread = NULL;
+	mpLogRunnable = NULL;
 }
 
 LogManager::~LogManager() {
 	// TODO Auto-generated destructor stub
 	mIsRunning = false;
+	Stop();
 }
 
 bool LogManager::Log(LOG_LEVEL nLevel, const char *format, ...) {
@@ -100,7 +103,7 @@ bool LogManager::Log(LOG_LEVEL nLevel, const char *format, ...) {
 //			lm->Reset();
 //			va_list	agList;
 //			va_start(agList, format);
-//			vsnprintf(lm->buffer, MAXLEN - 1, format, agList);
+//			vsnprintf(lm->buffer, MAX_BUFFER_LEN - 1, format, agList);
 //			va_end(agList);
 //			mLogMessageList.PushBack(lm);
 //			return true;
@@ -116,7 +119,7 @@ bool LogManager::Log(LOG_LEVEL nLevel, const char *format, ...) {
                 delete g_pFileCtrl;
             }
             g_pFileCtrl = NULL;
-            g_pFileCtrl = new CFileCtrl(mLogDir.c_str(), "Log", 128);
+            g_pFileCtrl = new CFileCtrl(mLogDir.c_str(), "Log", 30);
             if (!g_pFileCtrl) {
                 return -1;
             }
@@ -128,21 +131,22 @@ bool LogManager::Log(LOG_LEVEL nLevel, const char *format, ...) {
         if( lm != NULL ) {
             lm->Reset();
 
+			char bitBuffer[64];
+
     	    //get current time
     	    time_t stm = time(NULL);
             struct tm tTime;
             localtime_r(&stm,&tTime);
-            snprintf(lm->bitBuffer, 64, "[ %d-%02d-%02d %02d:%02d:%02d ] ", tTime.tm_year+1900, tTime.tm_mon+1, tTime.tm_mday, tTime.tm_hour, tTime.tm_min, tTime.tm_sec);
+            snprintf(bitBuffer, 64, "[ %d-%02d-%02d %02d:%02d:%02d ] ", tTime.tm_year+1900, tTime.tm_mon+1, tTime.tm_mday, tTime.tm_hour, tTime.tm_min, tTime.tm_sec);
 
             //get va_list
-            char *p = lm->buffer;
             va_list	agList;
             va_start(agList, format);
-            vsnprintf(p, MAXLEN - 1, format, agList);
+            vsnprintf(lm->buffer, MAX_LOG_BUFFER_LEN - 1, format, agList);
             va_end(agList);
 
             strcat(lm->buffer, "\n");
-            g_pFileCtrl->LogMsg(lm->buffer, (int)strlen(lm->buffer), lm->bitBuffer);
+            g_pFileCtrl->LogMsg(lm->buffer, (int)strlen(lm->buffer), bitBuffer);
 
             mIdleMessageList.PushBack(lm);
         }
@@ -154,13 +158,19 @@ bool LogManager::Log(LOG_LEVEL nLevel, const char *format, ...) {
 }
 
 bool LogManager::Start(int maxIdle, LOG_LEVEL nLevel, const string& dir) {
+	if( !mIsRunning ) {
+		mIsRunning = true;
+	} else {
+		return false;
+	}
+
+	printf("# LogManager starting... \n");
+
 	/* create log buffers */
 	for(int i = 0; i < maxIdle; i++) {
 		Message *m = new Message();
 		mIdleMessageList.PushBack(m);
 	}
-
-	mIsRunning = true;
 
 	// Just 4 log
 	g_iLogLevel = nLevel;
@@ -171,7 +181,8 @@ bool LogManager::Start(int maxIdle, LOG_LEVEL nLevel, const string& dir) {
 //    KLog::SetLogDirectory(g_SysConf.strLogPath.c_str());
 
 	/* start log thread */
-	mpLogThread = new KThread(new LogRunnable(this));
+    mpLogRunnable = new LogRunnable(this);
+	mpLogThread = new KThread(mpLogRunnable);
 	if( mpLogThread->start() != 0 ) {
 //		printf("# Create log thread ok \n");
 	}
@@ -180,10 +191,21 @@ bool LogManager::Start(int maxIdle, LOG_LEVEL nLevel, const string& dir) {
 }
 
 bool LogManager::Stop() {
+	if( mIsRunning ) {
+		mIsRunning = false;
+	} else {
+		return false;
+	}
+
+	printf("# LogManager stopping... \n");
+
 	/* stop log thread */
-	mIsRunning = false;
+
 	if( mpLogThread ) {
 		mpLogThread->stop();
+	}
+	if( mpLogRunnable ) {
+		delete mpLogRunnable;
 	}
 
 	/* release log buffers */
@@ -199,6 +221,8 @@ bool LogManager::Stop() {
 		delete m;
 	}
 
+	printf("# LogManager stop OK. \n");
+
 	return true;
 }
 
@@ -206,13 +230,13 @@ bool LogManager::IsRunning() {
 	return mIsRunning;
 }
 
-MessageList *LogManager::GetIdleMessageList() {
-	return &mIdleMessageList;
-}
-
-MessageList *LogManager::GetLogMessageList() {
-	return &mLogMessageList;
-}
+//MessageList *LogManager::GetIdleMessageList() {
+//	return &mIdleMessageList;
+//}
+//
+//MessageList *LogManager::GetLogMessageList() {
+//	return &mLogMessageList;
+//}
 
 int LogManager::MkDir(const char* pDir) {
     int ret = 0;
