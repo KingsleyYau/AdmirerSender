@@ -61,7 +61,7 @@ typedef struct DBStruct {
 		mMember = item.mMember;
 		miSyncTime = item.miSyncTime;
 		miSyncIndex = item.miSyncIndex;
-		mbSyncForce = item.miSyncIndex;
+		mbSyncForce = item.mbSyncForce;
 	}
 
 	DBStruct& operator=(const DBStruct& item) {
@@ -77,7 +77,7 @@ typedef struct DBStruct {
 		mMember = item.mMember;
 		miSyncTime = item.miSyncTime;
 		miSyncIndex = item.miSyncIndex;
-		mbSyncForce = item.miSyncIndex;
+		mbSyncForce = item.mbSyncForce;
 		return *this;
 	}
 
@@ -224,6 +224,11 @@ public:
 	 * 在内存表更新女士能否发信
 	 */
 	bool UpdateLadyCanSend(const string& womanId, bool bCanSend);
+
+	/**
+	 * 获取内存表允许收信男士数量
+	 */
+	int GetManCanRecvCount();
 
 private:
 	/****************************** 功能函数start ***********************************************/

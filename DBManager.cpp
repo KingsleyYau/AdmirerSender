@@ -236,7 +236,7 @@ void DBManager::SyncLadyForce(int siteId) {
 
 void DBManager::SyncLadyList(int siteId) {
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_WARNING,
 			"DBManager::SyncLadyList( "
 			"tid : %d, "
 			"[增量同步女士], "
@@ -364,8 +364,7 @@ void DBManager::SyncLadyList(int siteId) {
 					LOG_WARNING,
 					"DBManager::SyncLadyList( "
 					"tid : %d, "
-					"[增量同步女士], "
-					"失败, "
+					"[增量同步女士, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -378,17 +377,15 @@ void DBManager::SyncLadyList(int siteId) {
 	ExecSQL(mdb, "COMMIT;", NULL);
 
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_WARNING,
 			"DBManager::SyncLadyList( "
 			"tid : %d, "
 			"[增量获取女士], "
 			"siteId : %d, "
-			"bFlag : %s, "
 			"iRow : %d "
 			")",
 			(int)syscall(SYS_gettid),
 			siteId,
-			bFlag?"true":"false",
 			iRow
 			);
 }
@@ -575,8 +572,7 @@ bool DBManager::CanSendLetter(
 					LOG_MSG,
 					"DBManager::CanSendLetter( "
 					"tid : %d, "
-					"[1.检查女士资料] "
-					"失败, "
+					"[1.检查女士资料, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -660,8 +656,7 @@ bool DBManager::CanSendLetter(
 					LOG_MSG,
 					"DBManager::CanSendLetter( "
 					"tid : %d, "
-					"[4.检查代理机构是否开通意向信], "
-					"失败, "
+					"[4.检查代理机构是否开通意向信, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -727,8 +722,7 @@ bool DBManager::CanSendLetter(
 					LOG_MSG,
 					"DBManager::CanSendLetter( "
 					"tid : %d, "
-					"[7.同一女士一天內發送意向信不能超過机构设定值] "
-					"失败, "
+					"[7.同一女士一天內發送意向信不能超過机构设定值, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -779,8 +773,7 @@ bool DBManager::CanSendLetter(
 					LOG_MSG,
 					"DBManager::CanSendLetter( "
 					"tid : %d, "
-					"[9.女士在5天內EMF通信关系不超过8对] "
-					"失败, "
+					"[9.女士在5天內EMF通信关系不超过8对, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -948,10 +941,11 @@ bool DBManager::GetLadyRegulationInfo(
 					LOG_MSG,
 					"DBManager::GetLadyRegulationInfo( "
 					"tid : %d, "
-					"[获取模板] "
-					"失败"
+					"[获取模板, 失败], "
+					"sql : %s "
 					")",
-					(int)syscall(SYS_gettid)
+					(int)syscall(SYS_gettid),
+					sql
 					);
 		}
 	}
@@ -1081,10 +1075,11 @@ bool DBManager::GetTemplateInfo(Lady& lady, AdmireTemplate& admireTemplate) {
 					LOG_WARNING,
 					"DBManager::GetTemplateInfo( "
 					"tid : %d, "
-					"[获取模板详情和附件], "
-					"失败"
+					"[获取模板详情和附件, 失败], "
+					"sql : %s "
 					")",
-					(int)syscall(SYS_gettid)
+					(int)syscall(SYS_gettid),
+					sql
 					);
 		}
 	}
@@ -1456,8 +1451,7 @@ bool DBManager::FinishLetter(const Lady& lady) {
 				LOG_WARNING,
 				"DBManager::FinishLetter( "
 				"tid : %d, "
-				"[更新启动意向信助手发送队列表], "
-				"失败, "
+				"[更新启动意向信助手发送队列表, 失败], "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
@@ -1694,8 +1688,7 @@ bool DBManager::SendLetter2Man(
 					LOG_WARNING,
 					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"[写入过渡表] "
-					"失败, "
+					"[写入过渡表, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -1770,8 +1763,7 @@ bool DBManager::SendLetter2Man(
 					LOG_WARNING,
 					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"[写入主表] "
-					"失败, "
+					"[写入主表, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -1845,8 +1837,7 @@ bool DBManager::SendLetter2Man(
 					LOG_WARNING,
 					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"[写入从表] "
-					"失败, "
+					"[写入从表, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -1903,8 +1894,7 @@ bool DBManager::SendLetter2Man(
 					LOG_WARNING,
 					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"[更新机构意向信当日限量余数] "
-					"失败, "
+					"[更新机构意向信当日限量余数, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -1953,8 +1943,7 @@ bool DBManager::SendLetter2Man(
 					LOG_WARNING,
 					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"[更新男士会员当日意向信提交数量] "
-					"失败, "
+					"[更新男士会员当日意向信提交数量, 失败] "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -2047,8 +2036,7 @@ bool DBManager::SendLetter2Man(
 					LOG_WARNING,
 					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"[写入工作人员本月发意向信数量] "
-					"失败, "
+					"[写入工作人员本月发意向信数量, 失败] "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -2078,10 +2066,11 @@ bool DBManager::SendLetter2Man(
 					LOG_WARNING,
 					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"[以前审核功能的部分代码,以前需要审核信件，现在不需要，摘必须功能], "
-					"失败 "
+					"[以前审核功能的部分代码,以前需要审核信件，现在不需要，摘必须功能, 失败], "
+					"sql : %s "
 					")",
-					(int)syscall(SYS_gettid)
+					(int)syscall(SYS_gettid),
+					sql
 					);
 		}
 	}
@@ -2140,8 +2129,7 @@ bool DBManager::SendLetter2Man(
 					LOG_WARNING,
 					"DBManager::SendLetter2Man( "
 					"tid : %d, "
-					"[更新启动意向信助手发送队列表] "
-					"失败, "
+					"[更新启动意向信助手发送队列表, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -2171,8 +2159,7 @@ bool DBManager::SendLetter2Man(
 				LOG_WARNING,
 				"DBManager::SendLetter2Man( "
 				"tid : %d, "
-				"[根据女士条件发送信件给男士], "
-				"失败"
+				"[根据女士条件发送信件给男士, 失败] "
 				")",
 				(int)syscall(SYS_gettid)
 				);
@@ -2248,10 +2235,11 @@ bool DBManager::UpdateFAV(const Lady& lady, const Man& man) {
 					LOG_WARNING,
 					"DBManager::UpdateFAV( "
 					"tid : %d, "
-					"[更新FAV表] "
-					"失败"
+					"[更新FAV表, 失败], "
+					"sql : %s "
 					")",
-					(int)syscall(SYS_gettid)
+					(int)syscall(SYS_gettid),
+					sql
 					);
 		}
 	}
@@ -2318,8 +2306,7 @@ bool DBManager::UpdateMsgProcessList(const Man& man, const Lady& lady) {
 					LOG_WARNING,
 					"DBManager::UpdateMsgProcessList( "
 					"tid : %d, "
-					"[以前审核功能的部分代码,以前需要审核信件，现在不需要，摘必须功能], "
-					"失败, "
+					"[以前审核功能的部分代码,以前需要审核信件，现在不需要，摘必须功能, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -2362,7 +2349,7 @@ bool DBManager::UpdateEmailSystem(
 			"manId : %s, "
 			"womanId : %s, "
 			"siteId : %d, "
-			"admireBody : %s "
+			"admireBody : %s, "
 			"templateType : %s "
 			")",
 			(int)syscall(SYS_gettid),
@@ -2432,11 +2419,12 @@ bool DBManager::UpdateEmailSystem(
 				"SELECT id, number, info "
 				"FROM msg_process_list "
 				"WHERE manid = '%s' "
-				"AND womansiteid = 0 "
+				"AND womansiteid = %d "
 				"AND type = 2 "
 				"AND status = 'N' "
 				";",
-				man.manId.c_str()
+				man.manId.c_str(),
+				lady.mSiteId
 		);
 
 		LogManager::GetLogManager()->Log(
@@ -2477,8 +2465,7 @@ bool DBManager::UpdateEmailSystem(
 					LOG_WARNING,
 					"DBManager::UpdateEmailSystem( "
 					"tid : %d, "
-					"[更新一大堆东西] "
-					"失败, "
+					"[更新一大堆东西, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -2591,8 +2578,7 @@ bool DBManager::UpdateEmailSystem(
 						LOG_WARNING,
 						"DBManager::UpdateEmailSystem( "
 						"tid : %d, "
-						"[更新一大堆东西(更新)] "
-						"失败, "
+						"[更新一大堆东西(更新), 失败], "
 						"sql : %s "
 						")",
 						(int)syscall(SYS_gettid),
@@ -2614,7 +2600,7 @@ bool DBManager::UpdateEmailSystem(
 					"type = 2, "
 					"addtime = DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\"), "
 					"senthour = %s, "
-					"womansiteid = 0, "
+					"womansiteid = %d, "
 					"info = '%s', "
 					"number = 1, "
 					"lastupdatetime = DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\"), "
@@ -2626,6 +2612,7 @@ bool DBManager::UpdateEmailSystem(
 					SqlTransfer(man.email).c_str(),
 					man.sid.c_str(),
 					senthour,
+					lady.mSiteId,
 					SqlTransfer(phpObjectWomanInfo.Serialize()).c_str()
 			);
 
@@ -2650,8 +2637,7 @@ bool DBManager::UpdateEmailSystem(
 						LOG_WARNING,
 						"DBManager::UpdateEmailSystem( "
 						"tid : %d, "
-						"[更新一大堆东西(插入)] "
-						"失败, "
+						"[更新一大堆东西(插入), 失败], "
 						"sql : %s "
 						")",
 						(int)syscall(SYS_gettid),
@@ -2707,28 +2693,21 @@ string DBManager::SqlTransfer(const string& sql) {
 string DBManager::EncryptWin(const string& str) {
 	string result = "";
 
-	string end = str.substr(str.length() - 1, 1);
-	int iEnd = atoi(end.c_str());
+	char end = str.c_str()[str.length() - 1];
+	int iEnd = atoi(&end);
 
 	string start = str.substr(0, str.length() - 1);
 
-	long long lStart = atoll(start.c_str()) + 152;
-	lStart *= iEnd;
-	lStart += iEnd;
+	long long lStart = atoll(start.c_str()) + 152 * iEnd + iEnd;
 
 	char temp[128];
 	sprintf(temp, "%d%lld", iEnd, lStart);
-	result = temp;
 
-	int k;
-	char kTemp[8];
-	char iTemp[8];
-	for(int i = 48; i <= 57; i++) {
-		k = 17 + i;
-		sprintf(iTemp, "%d", i);
-		sprintf(kTemp, "%d", k);
-		result = StringHandle::replace(result, iTemp, kTemp);
+	for(int i = 0; i < strlen(temp); i++) {
+		temp[i] += 17;
 	}
+
+	result = temp;
 
 	return result;
 }
@@ -2957,8 +2936,7 @@ bool DBManager::CheckLadyCondition(const Man& man, const Lady& lady) {
 				LOG_STAT,
 				"DBManager::CheckLadyCondition( "
 				"tid : %d, "
-				"[检查女士自定义条件], "
-				"失败, "
+				"[检查女士自定义条件, 失败], "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
@@ -3064,8 +3042,7 @@ bool DBManager::CheckManInfo(Man& man, const Lady& lady) {
 				LOG_STAT,
 				"DBManager::CheckManInfo( "
 				"tid : %d, "
-				"[检查男士信息] "
-				"失败, "
+				"[检查男士信息, 失败], "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
@@ -3142,8 +3119,7 @@ bool DBManager::CheckEMF(const Man& man, const Lady& lady) {
 					LOG_STAT,
 					"DBManager::CheckEMF( "
 					"tid : %d, "
-					"[3.检查是否有EMF通信关系或者女士是否给男士发过发过首封EMF, 检查男士是否发过BP信件给女士] "
-					"失败, "
+					"[3.检查是否有EMF通信关系或者女士是否给男士发过发过首封EMF, 检查男士是否发过BP信件给女士, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -3222,8 +3198,7 @@ bool DBManager::CheckAdmire(const Man& man, const Lady& lady) {
 					LOG_STAT,
 					"DBManager::CheckAdmire( "
 					"tid : %d, "
-					"[5.同一机构多个女士在短时间內向男士提交过意向信] "
-					"失败, "
+					"[5.同一机构多个女士在短时间內向男士提交过意向信, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -3297,8 +3272,7 @@ bool DBManager::CheckAdmire24Hour(const Man& man, const Lady& lady) {
 					LOG_STAT,
 					"DBManager::CheckAdmire24Hour( "
 					"tid : %d, "
-					"[5.1.检查该女士与该男士24小时内有没有提交过意向信] "
-					"失败, "
+					"[5.1.检查该女士与该男士24小时内有没有提交过意向信, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -3382,8 +3356,7 @@ bool DBManager::CheckAdmireCount(const Man& man, const Lady& lady) {
 					LOG_STAT,
 					"DBManager::CheckAdmireCount( "
 					"tid : %d, "
-					"[6.男士当天收到多于manmaxnumoneday封意向信即禁发] "
-					"失败, "
+					"[6.男士当天收到多于manmaxnumoneday封意向信即禁发, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -3468,8 +3441,7 @@ bool DBManager::CheckEMFCount(const Man& man, const Lady& lady) {
 				LOG_STAT,
 				"DBManager::CheckEMFCount( "
 				"tid : %d, "
-				"[8.男士在5天內EMF通信关系超过50对] "
-				"失败, "
+				"[8.男士在5天內EMF通信关系超过50对, 失败], "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
@@ -3549,8 +3521,7 @@ bool DBManager::CheckCupidNote(const Man& man, const Lady& lady) {
 					LOG_STAT,
 					"DBManager::CheckCupidNote( "
 					"tid : %d, "
-					"[10.检查是否男士发过CupidNote给女士] "
-					"失败, "
+					"[10.检查是否男士发过CupidNote给女士, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -3631,8 +3602,7 @@ bool DBManager::CheckAdmireRecv(const Man& man, const Lady& lady) {
 					LOG_STAT,
 					"DBManager::CheckAdmireRecv( "
 					"tid : %d, "
-					"[11.检查是否发过意向信] "
-					"失败, "
+					"[11.检查是否发过意向信, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -3679,8 +3649,7 @@ bool DBManager::SetAllLetterDelete()
 					LOG_WARNING,
 					"DBManager::SetAllLetterDelete( "
 					"tid : %d, "
-					"[标记数据库女士发送记录为已经删除], "
-					"失败, "
+					"[标记数据库女士发送记录为已经删除, 失败], "
 					"iSite : %d, "
 					"sql : %s "
 					")",
@@ -3719,8 +3688,7 @@ bool DBManager::SetAllLetterDelete()
 					LOG_WARNING,
 					"DBManager::SetAllLetterDelete( "
 					"tid : %d, "
-					"[清空内存表所有男士], "
-					"失败, "
+					"[清空内存表所有男士, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -3756,8 +3724,7 @@ bool DBManager::SetAllLetterDelete()
 					LOG_WARNING,
 					"DBManager::SetAllLetterDelete( "
 					"tid : %d, "
-					"[在内存表更新所有女士不能发信], "
-					"失败, "
+					"[在内存表更新所有女士不能发信, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -3855,7 +3822,7 @@ void DBManager::SyncManFromDatabase() {
 
 bool DBManager::SyncManFromDatabaseLoginRecent() {
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_WARNING,
 			"DBManager::SyncManFromDatabaseLoginRecent( "
 			"tid : %d, "
 			"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表] "
@@ -3867,21 +3834,22 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 
 	unsigned int iHandleTime = GetTickCount();
 	char sql[MAXSQLSIZE] = {'\0'};
+	char sql2[MAXSQLSIZE] = {'\0'};
 	int iStartIndex;
 	int iNeedSync = 3000;
 	int iTotalSync = 0;
+	int iSync = 0;
 
-	ExecSQL( mdb, "BEGIN;", NULL );
 	sqlite3_stmt* stmtMan;
-	snprintf(sql, MAXSQLSIZE - 1,
-			"REPLACE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`, `admirerNotify`, `sid`, `lastName`, `email`, `mid`) "
-			"VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-			);
-	sqlite3_prepare_v2(mdb, sql, strlen(sql), &stmtMan, 0);
-
 	for(int i = 0; i < miDbCount; i++) {
 		iStartIndex = mpDbLady[i].miSyncIndex;
-		iTotalSync = 0;
+		iSync = 0;
+
+		snprintf(sql2, MAXSQLSIZE - 1,
+				"REPLACE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`, `admirerNotify`, `sid`, `lastName`, `email`, `mid`, `can_sent_%s`) "
+				"VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+				mpDbLady[i].mPostfix.c_str()
+				);
 
 		// 最近30天有登录过, 最后登录时间倒叙
 		snprintf(sql, MAXSQLSIZE - 1,
@@ -3923,6 +3891,9 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 				MYSQL_ROW row;
 				fields = mysql_fetch_fields(pSQLRes);
 
+				ExecSQL( mdb, "BEGIN;", NULL );
+				sqlite3_prepare_v2(mdb, sql2, strlen(sql2), &stmtMan, 0);
+
 				for (int i = 0; i < iRow; i++) {
 					if ( (row = mysql_fetch_row(pSQLRes)) == NULL ) {
 						break;
@@ -3960,8 +3931,7 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 								LOG_STAT,
 								"DBManager::SyncManFromDatabaseLoginRecent( "
 								"tid : %d, "
-								"[从数据库获取男士] "
-								"失败, "
+								"[从数据库获取男士, 失败], "
 								"row : %d, "
 								"value : %s "
 								")",
@@ -3970,24 +3940,28 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 								value.c_str()
 								);
 					} else {
-						iTotalSync++;
+						iSync++;
 					}
 				}
 
+				sqlite3_finalize(stmtMan);
+				ExecSQL( mdb, "COMMIT;", NULL );
+
 			}
 
-			if( iNeedSync == iTotalSync ) {
+			if( iNeedSync == iSync ) {
 				// 只要其中一个分站够数据都标记为可以数量足够
 				bFlag = true;
 			}
+
+			iTotalSync += iSync;
 
 		} else {
 			LogManager::GetLogManager()->Log(
 					LOG_WARNING,
 					"DBManager::SyncManFromDatabaseLoginRecent( "
 					"tid : %d, "
-					"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表] "
-					"失败, "
+					"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -4010,36 +3984,35 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 				sql
 				);
 
-		usleep(1000 * iHandleSiteTime);
+		usleep(1000 * 1000);
 	}
 
 	if( !bFlag ) {
 		LogManager::GetLogManager()->Log(
-				LOG_MSG,
+				LOG_WARNING,
 				"DBManager::SyncManFromDatabaseLoginRecent( "
 				"tid : %d, "
-				"没有更多数据 "
+				"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表, 没有更多数据] "
 				")",
 				(int)syscall(SYS_gettid)
 				);
 	}
 
-	sqlite3_finalize(stmtMan);
-	ExecSQL( mdb, "COMMIT;", NULL );
-
 	iHandleTime = GetTickCount() - iHandleTime;
 
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_WARNING,
 			"DBManager::SyncManFromDatabaseLoginRecent( "
 			"tid : %d, "
-			"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表], "
-			"bFlag : %s, "
-			"iHandleTime : %u ms "
+			"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表, 完成], "
+			"iHandleTime : %u ms, "
+			"iTotalSync : %d, "
+			"sql : %s "
 			")",
 			(int)syscall(SYS_gettid),
-			bFlag?"true":"false",
-			iHandleTime
+			iHandleTime,
+			iTotalSync,
+			sql
 			);
 
 	return bFlag;
@@ -4047,7 +4020,7 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 
 bool DBManager::SyncManFromDatabaseRegRecent() {
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_WARNING,
 			"DBManager::SyncManFromDatabaseRegRecent( "
 			"tid : %d, "
 			"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表] "
@@ -4059,21 +4032,23 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 
 	unsigned int iHandleTime = GetTickCount();
 	char sql[MAXSQLSIZE] = {'\0'};
+	char sql2[MAXSQLSIZE] = {'\0'};
 	int iStartIndex;
 	int iNeedSync = 3000;
 	int iTotalSync = 0;
+	int iSync = 0;
 
-	ExecSQL( mdb, "BEGIN;", NULL );
 	sqlite3_stmt* stmtMan;
-	snprintf(sql, MAXSQLSIZE - 1,
-			"REPLACE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`, `admirerNotify`, `sid`, `lastName`, `email`, `mid`) "
-			"VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-			);
-	sqlite3_prepare_v2(mdb, sql, strlen(sql), &stmtMan, 0);
 
 	for(int i = 0; i < miDbCount; i++) {
 		iStartIndex = mpDbLady[i].miSyncIndex;
-		iTotalSync = 0;
+		iSync = 0;
+
+		snprintf(sql2, MAXSQLSIZE - 1,
+				"REPLACE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`, `admirerNotify`, `sid`, `lastName`, `email`, `mid`, `can_sent_%s`) "
+				"VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+				mpDbLady[i].mPostfix.c_str()
+				);
 
 		snprintf(sql, MAXSQLSIZE - 1,
 				"SELECT manid, last_login "
@@ -4113,6 +4088,9 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 				MYSQL_FIELD* fields;
 				MYSQL_ROW row;
 				fields = mysql_fetch_fields(pSQLRes);
+
+				ExecSQL( mdb, "BEGIN;", NULL );
+				sqlite3_prepare_v2(mdb, sql2, strlen(sql2), &stmtMan, 0);
 
 				for (int i = 0; i < iRow; i++) {
 					if ( (row = mysql_fetch_row(pSQLRes)) == NULL ) {
@@ -4164,24 +4142,28 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 //								value.c_str()
 //								);
 					} else {
-						iTotalSync++;
+						iSync++;
 					}
 				}
 
+				sqlite3_finalize(stmtMan);
+				ExecSQL( mdb, "COMMIT;", NULL );
+
 			}
 
-			if( iNeedSync == iTotalSync ) {
+			if( iNeedSync == iSync ) {
 				// 只要其中一个分站够数据都标记为可以数量足够
 				bFlag = true;
 			}
+
+			iTotalSync += iSync;
 
 		} else {
 			LogManager::GetLogManager()->Log(
 					LOG_WARNING,
 					"DBManager::SyncManFromDatabaseRegRecent( "
 					"tid : %d, "
-					"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表] "
-					"失败, "
+					"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -4204,7 +4186,7 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 				sql
 				);
 
-		usleep(1000 * iHandleSiteTime);
+		usleep(1000 * 1000);
 	}
 
 	if( !bFlag ) {
@@ -4212,28 +4194,27 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 				LOG_WARNING,
 				"DBManager::SyncManFromDatabaseRegRecent( "
 				"tid : %d, "
-				"没有更多数据 "
+				"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表, 没有更多数据] "
 				")",
 				(int)syscall(SYS_gettid)
 				);
 	}
 
-	sqlite3_finalize(stmtMan);
-	ExecSQL( mdb, "COMMIT;", NULL );
-
 	iHandleTime = GetTickCount() - iHandleTime;
 
 	LogManager::GetLogManager()->Log(
-			LOG_MSG,
+			LOG_WARNING,
 			"DBManager::SyncManFromDatabaseRegRecent( "
 			"tid : %d, "
-			"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表], "
-			"bFlag : %s, "
-			"iHandleTime : %u ms "
+			"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表, 完成], "
+			"iHandleTime : %u ms, "
+			"iTotalSync : %d, "
+			"sql : %s "
 			")",
 			(int)syscall(SYS_gettid),
-			bFlag?"true":"false",
-			iHandleTime
+			iHandleTime,
+			iTotalSync,
+			sql
 			);
 
 	return bFlag;
@@ -4291,8 +4272,7 @@ bool DBManager::CheckManRegRecent(const Man& man) {
 				LOG_WARNING,
 				"DBManager::CheckManRegRecent( "
 				"tid : %d, "
-				"[检查男士是否最近注册] "
-				"失败, "
+				"[检查男士是否最近注册, 失败], "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
@@ -4380,8 +4360,7 @@ bool DBManager::SyncManBasicInfo(Man& man) {
 				LOG_WARNING,
 				"DBManager::SyncManBasicInfo( "
 				"tid : %d, "
-				"[从数据库同步男士基本信息] "
-				"失败, "
+				"[从数据库同步男士基本信息, 失败], "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
@@ -4452,8 +4431,7 @@ bool DBManager::CheckManCountEnougth() {
 				LOG_WARNING,
 				"DBManager::CheckManCountEnougth( "
 				"tid : %d, "
-				"[查询内存表男士是否足够], "
-				"失败, "
+				"[查询内存表男士是否足够, 失败], "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
@@ -4499,8 +4477,8 @@ bool DBManager::CreateTable(sqlite3 *db) {
 	// 创建女士表
 	snprintf(sql, MAXSQLSIZE - 1,
 			"CREATE TABLE woman( "
-						"ID INTEGER PRIMARY KEY AUTOINCREMENT, "
-						"womanid TEXT, "
+//						"ID INTEGER PRIMARY KEY AUTOINCREMENT, "
+						"womanid TEXT PRIMARY KEY, "
 						"siteid INT, "
 						"sort INT DEFAULT 0, "
 						"can_sent INT DEFAULT 1 "
@@ -4523,8 +4501,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 				LOG_ERR_USER,
 				"DBManager::CreateTable( "
 				"tid : %d, "
-				"[创建女士表], "
-				"失败, "
+				"[创建女士表, 失败], "
 				"sql : %s, "
 				"msg : %s "
 				")",
@@ -4553,8 +4530,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 				LOG_ERR_USER,
 				"DBManager::CreateTable( "
 				"tid : %d, "
-				"[创建女士表索引(womanid)], "
-				"失败, "
+				"[创建女士表索引(womanid), 失败], "
 				"sql : %s, "
 				"msg : %s "
 				")",
@@ -4582,8 +4558,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 				LOG_ERR_USER,
 				"DBManager::CreateTable( "
 				"tid : %d, "
-				"[创建女士表索引(sort)], "
-				"失败, "
+				"[创建女士表索引(sort), 失败], "
 				"sql : %s, "
 				"msg : %s "
 				")",
@@ -4618,8 +4593,8 @@ bool DBManager::CreateTable(sqlite3 *db) {
 	// 创建男士表
 	snprintf(sql, MAXSQLSIZE - 1,
 			"CREATE TABLE man( "
-						"ID INTEGER PRIMARY KEY AUTOINCREMENT, "
-						"manid TEXT, "
+//						"ID INTEGER PRIMARY KEY AUTOINCREMENT, "
+						"manid TEXT PRIMARY KEY, "
 						"manname TEXT, "
 						"login_time TEXT, "
 						"reg_time TEXT, "
@@ -4650,8 +4625,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 				LOG_ERR_USER,
 				"DBManager::CreateTable( "
 				"tid : %d, "
-				"[创建男士表], "
-				"失败, "
+				"[创建男士表, 失败], "
 				"sql : %s, "
 				"msg : %s "
 				")",
@@ -4680,8 +4654,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 				LOG_ERR_USER,
 				"DBManager::CreateTable( "
 				"tid : %d, "
-				"[创建男士表索引(manid)], "
-				"失败, "
+				"[创建男士表索引(manid), 失败], "
 				"sql : %s, "
 				"msg : %s "
 				")",
@@ -4709,8 +4682,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 				LOG_ERR_USER,
 				"DBManager::CreateTable( "
 				"tid : %d, "
-				"[创建男士表索引(login_time)], "
-				"失败, "
+				"[创建男士表索引(login_time), 失败], "
 				"sql : %s, "
 				"msg : %s "
 				")",
@@ -4738,8 +4710,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 				LOG_ERR_USER,
 				"DBManager::CreateTable( "
 				"tid : %d, "
-				"[创建男士表索引(reg_time)], "
-				"失败, "
+				"[创建男士表索引(reg_time), 失败], "
 				"sql : %s, "
 				"msg : %s "
 				")",
@@ -4986,8 +4957,8 @@ bool DBManager::UpdateManRecv(const Man& man, int iSiteId) {
 					LOG_WARNING,
 					"DBManager::UpdateManRecv( "
 					"tid : %d, "
-					"[在内存表更新男士收信数量], "
-					"失败, 标记男士为不能发送意向信,  "
+					"[在内存表更新男士收信数量, 失败], "
+					"[标记男士为不能发送意向信],  "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -5055,6 +5026,50 @@ bool DBManager::UpdateLadyCanSend(const string& womanId, bool bCanSend) {
 	return bFlag;
 }
 
+int DBManager::GetManCanRecvCount() {
+	int iCount = 0;
+
+	char sql[MAXSQLSIZE] = {'\0'};
+
+	for(int i = 0; i < miDbCount; i++) {
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(manid) "
+				"FROM man "
+				"WHERE can_sent_%s = 1 "
+				";",
+				mpDbLady[i].mPostfix.c_str()
+		);
+
+		bool bResult = false;
+		char** result = NULL;
+		int iRow = 0;
+		int iColumn = 0;
+		unsigned int iHandleSendListTime = GetTickCount();
+
+		bResult = QuerySQL(mdb, sql, &result, &iRow, &iColumn, NULL);
+		if( bResult && result ) {
+			if( iRow > 0 ) {
+				if( result[1] != NULL ) {
+					iCount += atoi(result[1]);
+				}
+			}
+		}
+	}
+
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::GetManCanRecvCount( "
+			"tid : %d, "
+			"[在内存表获取允许收信男士数量], "
+			"iCount : %d "
+			")",
+			(int)syscall(SYS_gettid),
+			iCount
+			);
+
+	return iCount;
+}
+
 bool DBManager::UpdateLadySent(const Lady& lady) {
 	bool bFlag = false;
 
@@ -5086,8 +5101,7 @@ bool DBManager::UpdateLadySent(const Lady& lady) {
 				LOG_WARNING,
 				"DBManager::UpdateLadySent( "
 				"tid : %d, "
-				"[在内存表更新女士发信排序], "
-				"失败, "
+				"[在内存表更新女士发信排序, 失败], "
 				"sql : %s, "
 				"msg : %s "
 				")",

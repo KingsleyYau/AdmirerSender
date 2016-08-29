@@ -435,6 +435,7 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 			LOG_WARNING,
 			"AdmirerSender::HandleRecvMessage( "
 			"tid : %d, "
+			"[收到请求], "
 			"m->fd: [%d], "
 			"request : \n%s\n"
 			")",
@@ -457,6 +458,17 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 		const char* pPath = dataHttpParser.GetPath().c_str();
 		HttpType type = dataHttpParser.GetType();
 
+		LogManager::GetLogManager()->Log(
+				LOG_WARNING,
+				"AdmirerSender::HandleRecvMessage( "
+				"tid : %d, "
+				"[收到请求], "
+				"pPath : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				pPath
+				);
+
 		if( type == GET ) {
 			if( strcmp(pPath, "/SYNCLADYLIST") == 0 ) {
 				// 增量获取发送女士
@@ -464,10 +476,9 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 						LOG_WARNING,
 						"AdmirerSender::HandleRecvMessage( "
 						"tid : %d, "
-						"[增量获取发送女士] "
+						"[收到请求, 增量获取发送女士] "
 						")",
-						(int)syscall(SYS_gettid),
-						m->fd
+						(int)syscall(SYS_gettid)
 						);
 
 				const char* pSiteId = dataHttpParser.GetParam("SITEID").c_str();
@@ -482,6 +493,17 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 
 			} else if( strcmp(pPath, "/GETAGENTSENDSTATUS") == 0 ) {
 				const char* pAgentId = dataHttpParser.GetParam("AGENTID").c_str();
+				LogManager::GetLogManager()->Log(
+						LOG_WARNING,
+						"AdmirerSender::HandleRecvMessage( "
+						"tid : %d, "
+						"[收到请求, 获取机构状态], "
+						"pAgentId : %s "
+						")",
+						(int)syscall(SYS_gettid),
+						pAgentId
+						);
+
 				if( pAgentId != NULL ) {
 					Json::Value statusNode;
 					GetAgentSendStatus(statusNode, (char*)pAgentId, m);
@@ -497,10 +519,9 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 						LOG_WARNING,
 						"AdmirerSender::HandleRecvMessage( "
 						"tid : %d, "
-						"[清空发送女士] "
+						"[收到请求, 清空发送女士] "
 						")",
-						(int)syscall(SYS_gettid),
-						m->fd
+						(int)syscall(SYS_gettid)
 						);
 
 				ClearLetterSendList(m);
@@ -527,6 +548,7 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 			LOG_WARNING,
 			"AdmirerSender::HandleRecvMessage( "
 			"tid : %d, "
+			"[收到请求, 发送返回], "
 			"m->fd: [%d], "
 			"ret : %d, "
 			"respond : \n%s\n"
@@ -801,8 +823,8 @@ void AdmirerSender::OnGetLady(
 					(int)syscall(SYS_gettid)
 					);
 
-			iHandleTime = MAX(50, iHandleTime);
-			iHandleTime = MIN(1000, iHandleTime);
+			iHandleTime = MAX(50 * 1000, iHandleTime);
+			iHandleTime = MIN(1000 * 1000, iHandleTime);
 
 			usleep(iHandleTime);
 
@@ -921,9 +943,14 @@ void AdmirerSender::StateRunnableHandle() {
 //					(MessageList*) mClientTcpServer.GetHandleMessageList()->Size()
 //					);
 			LogManager::GetLogManager()->Log(LOG_WARNING,
-					"AdmirerSender::StateRunnable( tid : %d, AdmirerSender::mLadyLetterSendListMap : %d )",
+					"AdmirerSender::StateRunnable( "
+					"tid : %d, "
+					"[内存待发送信件女士数量] : %d, "
+					"[内存允许收信男士数量] : %d "
+					")",
 					(int)syscall(SYS_gettid),
-					mLadyLetterSendListMap.Size()
+					mLadyLetterSendListMap.Size(),
+					mDBManager.GetManCanRecvCount()
 					);
 //			LogManager::GetLogManager()->Log(LOG_WARNING,
 //					"AdmirerSender::StateRunnable( "
