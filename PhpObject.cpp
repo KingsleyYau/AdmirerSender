@@ -7,6 +7,9 @@
 
 #include "PhpObject.h"
 
+#define ConsoleLog(fmt, ...)
+//#define ConsoleLog(fmt, ...) printf(fmt, ## __VA_ARGS__)
+
 PhpObject::PhpObject() {
 	// TODO Auto-generated constructor stub
 	Reset();
@@ -126,21 +129,26 @@ bool PhpObject::UnSerialize(string serializeString) {
 	PhpObject* pCurObj = this;
 
 	while( bFlag && index < (int)serializeString.length() ) {
+		ConsoleLog("# Parse index : %d, char : %c \n", index, serializeString[index] );
+
 		switch( serializeString[index] ) {
 		case '{':{
-//			printf("# parse : '{' \n");
+			ConsoleLog("# Parse '{' \n");
 
 			if( index + 1 < (int)serializeString.length() ) {
 				switch (serializeString[index + 1]) {
 				case 's': {
+					ConsoleLog("# Parse '{' : ObjectTypeMap \n");
 					pCurObj->SetObjectType(ObjectTypeMap);
 
 				}break;
 				case 'i': {
+					ConsoleLog("# Parse '{' : ObjectTypeArray \n");
 					pCurObj->SetObjectType(ObjectTypeArray);
 
 				}break;
 				default: {
+					ConsoleLog("# Parse '{' : ObjectTypeUnknow \n");
 					bFlag = false;
 
 				}break;
@@ -160,13 +168,16 @@ bool PhpObject::UnSerialize(string serializeString) {
 					switch( pParrentObj->mObjectType ) {
 					case ObjectTypeArray: {
 						// array (value1, value2...)
+						ConsoleLog("# Parse '{' parent : ObjectTypeArray \n");
+
 						pCurObj = &((*pParrentObj).Append(*pCurObj));
 
 					}break;
 					case ObjectTypeMap: {
 						// map (key => value)
+						ConsoleLog("# Parse '{' parent : ObjectTypeMap, key : %s \n", key.c_str());
+
 						if( key.length() > 0 ) {
-//							printf("# use : 'key' : %s \n", key.c_str());
 							(*pParrentObj)[key] = *pCurObj;
 							pCurObj = &((*pParrentObj)[key]);
 							key = "";
@@ -175,6 +186,7 @@ bool PhpObject::UnSerialize(string serializeString) {
 					}break;
 					default: {
 						// parse error
+						ConsoleLog("# Parse '{' parent : ObjectTypeUnknow \n");
 						bFlag = false;
 
 					}break;
@@ -193,7 +205,7 @@ bool PhpObject::UnSerialize(string serializeString) {
 
 		}break;
 		case '}':{
-//			printf("# parse : '}' \n");
+			ConsoleLog("# Parse '}' \n");
 			if( !parsePhpObjectStack.empty() ) {
 				pParrentObj = parsePhpObjectStack.top();
 				parsePhpObjectStack.pop();
@@ -205,6 +217,7 @@ bool PhpObject::UnSerialize(string serializeString) {
 
 			if( !bFlag ) {
 				// parse error
+				ConsoleLog("# Parse '}' : ObjectTypeUnknow \n");
 				break;
 
 			} else {
@@ -214,18 +227,19 @@ bool PhpObject::UnSerialize(string serializeString) {
 
 		}break;
 		case ';':{
-//			printf("# parse : ';' \n");
+			ConsoleLog("# Parse ';' \n");
 			if( !parsePhpObjectStack.empty() ) {
 				pParrentObj = parsePhpObjectStack.top();
 
 			}
 
 			string paramString = serializeString.substr(sep + 1, index - (sep + 1));
-//			printf("# paramString : %s \n", paramString.c_str());
+			ConsoleLog("# Parse ';' paramString : %s \n", paramString.c_str());
 			vector<string> param = StringHandle::splitWithVector(paramString, ":");
+			ConsoleLog("# Parse ';' param.size() : %d, param[0] : %s \n", param.size(), param[0].c_str());
 			if( param.size() > 2 ) {
-				if( param[0] == "s" && param.size() == 3 ) {
-//					printf("# parse : 's' \n");
+				if( param[0] == "s" && param.size() >= 3 ) {
+					ConsoleLog("# Parse ';' 's' \n");
 					if( pParrentObj != NULL ) {
 						// parent node type
 						switch( pParrentObj->mObjectType ) {
@@ -233,7 +247,7 @@ bool PhpObject::UnSerialize(string serializeString) {
 							// array (value1, value2...)
 							value = StringHandle::replace(param[2], "\"", "");
 							(*pParrentObj).Append(value);
-//							printf("# value : %s \n", value.c_str());
+							ConsoleLog("# Parse ';', ObjectTypeArray, value : %s \n", value.c_str());
 
 						}break;
 						case ObjectTypeMap: {
@@ -241,11 +255,11 @@ bool PhpObject::UnSerialize(string serializeString) {
 //							printf("# map (key => value) \n");
 							if( key.length() == 0 ) {
 								key = StringHandle::replace(param[2], "\"", "");
-//								printf("# key : %s \n", key.c_str());
+								ConsoleLog("# Parse ';', ObjectTypeMap, key : %s \n", key.c_str());
 
 							} else {
 								value = StringHandle::replace(param[2], "\"", "");
-//								printf("# value : %s \n", value.c_str());
+								ConsoleLog("# Parse ';', ObjectTypeMap, value : %s \n", value.c_str());
 
 								if( key.length() > 0 ) {
 									(*pParrentObj)[key] = value;
@@ -253,15 +267,17 @@ bool PhpObject::UnSerialize(string serializeString) {
 
 								} else {
 									// parse error
+									ConsoleLog("# Parse ';' : ObjectTypeMap, key error \n");
 									bFlag = false;
 
 								}
-//								printf("# use : 'key' : %s, 'value' : %s \n", key.c_str(), value.c_str());
+								ConsoleLog("# Parse ';' : ObjectTypeMap, key : %s, value : %s \n", key.c_str(), value.c_str());
 							}
 
 						}break;
 						default: {
 							// parse error
+							ConsoleLog("# Parse ';' : ObjectTypeUnknow \n");
 							bFlag = false;
 
 						}break;
@@ -269,6 +285,7 @@ bool PhpObject::UnSerialize(string serializeString) {
 
 					} else {
 						// current node
+						ConsoleLog("# Parse ';' : Current node \n");
 						value = StringHandle::replace(param[2], "\"", "");
 						(*pCurObj) = value;
 
@@ -276,9 +293,12 @@ bool PhpObject::UnSerialize(string serializeString) {
 
 				} else if( param[0] == "i" ) {
 					// array object index, continue
+					ConsoleLog("# Parse ';' param[0] : i, continue \n");
 
 				} else {
 					// parse error
+					ConsoleLog("# Parse ';' param[0] : unknow, error \n");
+
 					bFlag = false;
 					break;
 				}
@@ -286,6 +306,7 @@ bool PhpObject::UnSerialize(string serializeString) {
 
 			if( !bFlag ) {
 				// parse error
+				ConsoleLog("# Parse ';' error \n");
 				break;
 
 			} else {

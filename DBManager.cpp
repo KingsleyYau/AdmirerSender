@@ -1032,6 +1032,7 @@ bool DBManager::GetTemplateInfo(Lady& lady, AdmireTemplate& admireTemplate) {
 				MYSQL_FIELD* fields;
 				MYSQL_ROW row;
 				fields = mysql_fetch_fields(pSQLRes);
+				string attachments = "";
 
 				for (int i = 0; i < iRow; i++) {
 					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
@@ -1040,13 +1041,14 @@ bool DBManager::GetTemplateInfo(Lady& lady, AdmireTemplate& admireTemplate) {
 					bFlag = true;
 
 					// 分割附件
-					string attachments = row[0];
-					attachments += "|";
+					attachments = row[0];
+					static const string sep = "|";
+					attachments += sep;
 
 					string attachment;
 				    int index = 0;
 				    string::size_type pos;
-				    pos = attachments.find("|", index);
+				    pos = attachments.find(sep, index);
 				    while( pos != string::npos ) {
 				    	attachment = attachments.substr(index, pos - index);
 				    	if( attachment.length() > 0 ) {
@@ -1054,7 +1056,7 @@ bool DBManager::GetTemplateInfo(Lady& lady, AdmireTemplate& admireTemplate) {
 				    	}
 
 				    	index = pos + 1;
-						pos = attachments.find(",", index);
+						pos = attachments.find(sep, index);
 				    }
 
 					admireTemplate.at_greet = row[1];
@@ -1066,6 +1068,23 @@ bool DBManager::GetTemplateInfo(Lady& lady, AdmireTemplate& admireTemplate) {
 
 					break;
 				}
+
+				LogManager::GetLogManager()->Log(
+						LOG_STAT,
+						"DBManager::GetTemplateInfo( "
+						"tid : %d, "
+						"[获取模板详情和附件], "
+						"attachments : %s"
+						"at_greet : %s, "
+						"templateType : %s, "
+						"vg_id : %s "
+						")",
+						(int)syscall(SYS_gettid),
+						attachments.c_str(),
+						admireTemplate.at_greet.c_str(),
+						admireTemplate.templateType.c_str(),
+						admireTemplate.vg_id.c_str()
+						);
 			}
 		}
 		mDBSpoolLady[iIndex].ReleaseConnection(shIdt);
@@ -2553,7 +2572,7 @@ bool DBManager::UpdateEmailSystem(
 					"WHERE id = %s "
 					";",
 					number + 1,
-					SqlTransfer(admireInfo).c_str(),
+					admireInfo.c_str(),
 					id.c_str()
 			);
 
@@ -2613,7 +2632,7 @@ bool DBManager::UpdateEmailSystem(
 					man.sid.c_str(),
 					senthour,
 					lady.mSiteId,
-					SqlTransfer(phpObjectWomanInfo.Serialize()).c_str()
+					phpObjectWomanInfo.Serialize().c_str()
 			);
 
 			LogManager::GetLogManager()->Log(

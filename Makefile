@@ -43,7 +43,7 @@ $(TARGET):	deps $(OBJS)
 	$(CXX) -o $(TARGET) $(OBJS) $(LIBS)
 	@echo '################################################################'
 	@echo ''
-	@echo '# Bulid matchserver completed!'
+	@echo '# Bulid admirersender completed!'
 	@echo ''
 	@echo '################################################################'
 

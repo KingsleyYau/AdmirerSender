@@ -8,7 +8,6 @@
 #ifndef PhpObject_H_
 #define PhpObject_H_
 
-#include <json/json.h>
 #include <common/StringHandle.h>
 
 #include <stdio.h>
