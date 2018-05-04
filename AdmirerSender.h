@@ -9,9 +9,9 @@
 #ifndef AdmirerSender_H_
 #define AdmirerSender_H_
 
-#define VERSION_STRING "1.1.2"
+#define VERSION_STRING "1.1.6"
 
-#include "MessageList.h"
+#include <common/MessageList.h>
 #include "TcpServer.h"
 #include "DBManager.h"
 #include "DataHttpParser.h"
@@ -83,6 +83,9 @@ public:
 	void RemoveLadyFromAgent(const string& agentId);
 
 private:
+	void PrintConfig();
+
+private:
 	/*
 	 *	请求解析函数
 	 *	return : -1:Send fail respond / 0:Continue recv, send no respond / 1:Send OK respond
@@ -94,8 +97,7 @@ private:
 	 * 增量获取女士
 	 */
 	void SyncLadyList(
-			const char* siteId,
-			Message *m
+			const char* siteId
 			);
 
 	/**
@@ -103,15 +105,14 @@ private:
 	 */
 	void GetAgentSendStatus(
 			Json::Value& statusNode,
-			const char* agentId,
-			Message *m
+			const char* agentId
 			);
 
 	/**
 	 * 清空发送队列
 	 */
 	void ClearLetterSendList(
-			Message *m
+			long long timestamp
 			);
 
 	TcpServer mClientTcpServer;
@@ -136,7 +137,7 @@ private:
 	// DB
 	DBSTRUCT mDbMan;
 	int miDbCount;
-	DBSTRUCT mDbLady[4];
+	DBSTRUCT* mDbLady;
 	DBSTRUCT mDbEmail;
 
 	// LOG

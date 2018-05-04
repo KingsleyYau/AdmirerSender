@@ -28,7 +28,7 @@ AGENTID				机构Id
 
 3.清空发送队列接口(http get)
 路径				http://127.0.0.1:9876/CLEARLETTERSENDLIST
-例子 				http://127.0.0.1:9876/CLEARLETTERSENDLIST
+例子 				http://127.0.0.1:9876/CLEARLETTERSENDLIST?cleartime=(unix timestamp)
 
 返回json
 {"ret":成功失败标记(1:成功,0:失败)}

@@ -25,10 +25,11 @@ LIBS =		-L. \
 			-Wl,-Bdynamic -ldl -lz -lpthread 
 			
 COMMONOBJ =	common/LogFile.o common/md5.o common/KThread.o \
-			common/ConfFile.o common/Arithmetic.o common/DBSpool.o
+			common/ConfFile.o common/Arithmetic.o common/DBSpool.o \
+			common/MessageList.o common/LogManager.o
 JSONOBJS = 	json/json_reader.o json/json_value.o json/json_writer.o
-OBJS =		server.o LogManager.o TcpServer.o MessageList.o \
-			DataParser.o DataHttpParser.o DBManager.o \
+OBJS =		server.o TcpServer.o  \
+			DataParser.o DataHttpParser.o DBManager.o DBStruct.o \
 			AdmirerSender.o LadyDBLetterSender.o PhpObject.o
 OBJS +=		$(COMMONOBJ)
 OBJS += 	$(JSONOBJS)

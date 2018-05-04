@@ -1,5 +1,5 @@
-file snifferserver
-set args -f snifferserver.config
+file admirersender
+set args -f admirersender.config
 handle SIGPIPE nostop
 source gdb.break
 run

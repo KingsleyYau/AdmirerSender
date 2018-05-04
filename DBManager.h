@@ -8,9 +8,10 @@
 #ifndef DBMANAGER_H_
 #define DBMANAGER_H_
 
-#include "LogManager.h"
+#include <common/LogManager.h>
 #include "Lady.h"
 #include "Man.h"
+#include "DBStruct.h"
 #include "PhpObject.h"
 
 #include <common/TimeProc.hpp>
@@ -26,79 +27,10 @@
 #include <unistd.h>
 
 #include <string>
-#include <list>
 using namespace std;
 
 #define INVALID_INDEX -1
 
-typedef struct DBStruct {
-	DBStruct() {
-		mHost = "";
-		mPort = -1;
-		mUser = "";
-		mPasswd = "";
-		mDbName = "";
-		miMaxDatabaseThread = 0;
-		miSiteId = -1;
-		miOverValue = 0;
-		mPostfix = "";
-		mMember = "";
-		miSyncTime = 0;
-		miSyncIndex = 0;
-		mbSyncForce = false;
-	}
-
-	DBStruct(const DBStruct& item) {
-		mHost = item.mHost;
-		mPort = item.mPort;
-		mUser = item.mUser;
-		mPasswd = item.mPasswd;
-		mDbName = item.mDbName;
-		miMaxDatabaseThread = item.miMaxDatabaseThread;
-		miSiteId = item.miSiteId;
-		miOverValue = item.miOverValue;
-		mPostfix = item.mPostfix;
-		mMember = item.mMember;
-		miSyncTime = item.miSyncTime;
-		miSyncIndex = item.miSyncIndex;
-		mbSyncForce = item.mbSyncForce;
-	}
-
-	DBStruct& operator=(const DBStruct& item) {
-		mHost = item.mHost;
-		mPort = item.mPort;
-		mUser = item.mUser;
-		mPasswd = item.mPasswd;
-		mDbName = item.mDbName;
-		miMaxDatabaseThread = item.miMaxDatabaseThread;
-		miSiteId = item.miSiteId;
-		miOverValue = item.miOverValue;
-		mPostfix = item.mPostfix;
-		mMember = item.mMember;
-		miSyncTime = item.miSyncTime;
-		miSyncIndex = item.miSyncIndex;
-		mbSyncForce = item.mbSyncForce;
-		return *this;
-	}
-
-	string mHost;
-	short mPort;
-	string mUser;
-	string mPasswd;
-	string mDbName;
-	int miMaxDatabaseThread;
-	int miSiteId;
-	int miOverValue;
-	string mPostfix;
-	string mMember;
-	int miSyncTime;
-	int miSyncIndex;
-
-	bool mbSyncForce;
-	KMutex mSyncMutex;
-
-//	int miLastUpdate;
-} DBSTRUCT;
 
 class DBManager;
 class DBManagerCallback {
@@ -159,7 +91,7 @@ public:
 	 * 获取可发送的女士列表
 	 * @description 		内存
 	 */
-	bool GetLadyList();
+	bool GetLadyList(list<Lady>& ladyList);
 
 	/**
 	 * 女士是否可发意向信
@@ -212,7 +144,7 @@ public:
 	 * 设置所有意向信为删除状态
 	 * @description 		内存->数据库
 	 */
-	bool SetAllLetterDelete();
+	bool SetAllLetterDelete(long long timestamp = 0);
 
 	/**
 	 * 同步处理
@@ -412,6 +344,11 @@ private:
 	bool InsertManFromDataBase(sqlite3_stmt* stmtMan, const Man &man);
 
 	/**
+	 * 更新男士到内存表
+	 */
+	bool UpdateManFromDataBase(sqlite3_stmt* stmtMan, const Man &man);
+
+	/**
 	 * 查询男士是否足够
 	 */
 	bool CheckManCountEnougth();
@@ -419,12 +356,12 @@ private:
 	/**
 	 * 在内存表更新男士能否收信
 	 */
-	bool UpdateManCanRecv(const Man& man, int iSiteId, bool bCanRecv);
+	bool UpdateManCanRecv(const Man& man, const DBRECVSTRUCT& dbStruct, bool bCanRecv);
 
 	/**
 	 * 在内存表更新男士收信数量
 	 */
-	bool UpdateManRecv(const Man& man, int iSiteId);
+	bool UpdateManRecv(const Man& man, const DBRECVSTRUCT& dbStruct);
 
 	/**
 	 * 在内存表更新女士发信排序
@@ -470,7 +407,7 @@ private:
 	DBSTRUCT mDbEmail;
 
 	DBSpool mDBSpool;
-	DBSpool mDBSpoolLady[4];
+	DBSpool* mpDBSpoolLady;
 	DBSpool mDBSpoolEmail;
 
 	/**

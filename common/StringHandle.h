@@ -39,7 +39,7 @@ public:
 	    return ret;
 	}
 
-	static list<string> split(string str, string pattern) {
+	static list<string> split(string str, string pattern, bool skipEmpty = false) {
 	    string::size_type pos;
 	    list<string> result;
 	    str += pattern;
@@ -49,8 +49,10 @@ public:
 	        pos = str.find(pattern, i);
 	        if( pos < size ) {
 	            string s = str.substr(i, pos - i);
-	            result.push_back(s);
-	            i = pos + pattern.size() - 1;
+	            if (!skipEmpty || !s.empty()) {
+					result.push_back(s);
+					i = pos + pattern.size() - 1;
+	            }
 	        }
 	    }
 	    return result;

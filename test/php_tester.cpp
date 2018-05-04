@@ -61,7 +61,7 @@ int main(int argc, char *argv[]) {
 						 printf("# Read file error, ret : %d \n", ret);
 						 bBreak = true;
 					 } else {
-						 // 文件尾巴退出
+						 // 文件尾退出
 						 printf("# Read file finish, ret : %d \n", ret);
 						 bBreak = true;
 					 }
@@ -77,14 +77,27 @@ int main(int argc, char *argv[]) {
 			 }
 
 			 if( serializeString.length() > 0 ) {
-				 printf("# PhpObject UnSerialize string : %s \n", serializeString.c_str());
+				 printf("# PhpObject UnSerialize : \n%s\n\n\n", serializeString.c_str());
 
 				 if( obj.UnSerialize(serializeString) ) {
 					 printf("# PhpObject UnSerialize success \n");
 
 					 PhpObject objNew;
-					 string serializeStringNew = obj.Serialize();
-					 printf("# PhpObject Serialize : %s \n", serializeStringNew.c_str());
+					 PhpObject objAdd;
+					 objAdd["womanid"] = "123456";
+
+					 if( obj.isArray() ) {
+						 printf("# PhpObject obj is array \n");
+						 objNew = obj;
+						 objNew.Append(objAdd, 0);
+					 } else if ( obj.isMap() ) {
+						 printf("# PhpObject obj is map \n");
+						 objNew.Append(objAdd, 0);
+						 objNew.Append(obj);
+					 }
+
+					 string serializeStringNew = objNew.Serialize();
+					 printf("# PhpObject Serialize : \n%s\n\n\n", serializeStringNew.c_str());
 
 				 } else {
 					 printf("# PhpObject UnSerialize fail \n");

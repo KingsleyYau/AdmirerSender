@@ -9,7 +9,7 @@
 #define DATAHTTPPARSER_H_
 
 #include "DataParser.h"
-#include "MessageList.h"
+#include <common/MessageList.h>
 
 #include <common/Arithmetic.hpp>
 #include <common/KMutex.h>
@@ -24,13 +24,18 @@
 #include <map>
 using namespace std;
 
-typedef map<string, string> Parameters;
+struct ParamCompare: public std::binary_function<std::string, std::string, bool> {
+	bool operator()(const std::string& left,const std::string& right) const {
+		return strcasecmp(left.c_str(), right.c_str()) < 0;
+	}
+};
+typedef map<string, string, ParamCompare> Parameters;
 
-typedef enum HttpType {
+typedef enum _tagHttpType {
 	GET,
 	POST,
 	UNKNOW,
-};
+} HttpType;
 
 class DataHttpParser : public DataParser {
 public:

@@ -9,8 +9,8 @@
 #ifndef TCPSERVER_H_
 #define TCPSERVER_H_
 
-#include "MessageList.h"
-#include "LogManager.h"
+#include <common/MessageList.h>
+#include <common/LogManager.h>
 
 #include <stdio.h>
 #include <stdlib.h>

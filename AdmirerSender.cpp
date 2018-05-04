@@ -49,6 +49,7 @@ AdmirerSender::AdmirerSender() {
 	// TODO Auto-generated constructor stub
 	mpStateRunnable = new StateRunnable(this);
 	mpSendRunnable = new SendLetterRunnable(this);
+	mDbLady = NULL;
 }
 
 AdmirerSender::~AdmirerSender() {
@@ -60,6 +61,8 @@ AdmirerSender::~AdmirerSender() {
 	if( mpSendRunnable ) {
 		delete mpSendRunnable;
 	}
+
+	delete[] mDbLady;
 }
 
 bool AdmirerSender::Run(const string& config) {
@@ -68,11 +71,13 @@ bool AdmirerSender::Run(const string& config) {
 
 		// Reload config
 		if( Reload() ) {
+			/* log system */
 			if( miDebugMode == 1 ) {
 				LogManager::LogSetFlushBuffer(0);
 			} else {
 				LogManager::LogSetFlushBuffer(1 * BUFFER_SIZE_1K * BUFFER_SIZE_1K);
 			}
+			LogManager::GetLogManager()->Start(1000, miLogLevel, mLogDir);
 
 			return Run();
 		} else {
@@ -87,9 +92,6 @@ bool AdmirerSender::Run(const string& config) {
 }
 
 bool AdmirerSender::Run() {
-	/* log system */
-	LogManager::GetLogManager()->Start(1000, miLogLevel, mLogDir);
-
 	LogManager::GetLogManager()->Log(
 			LOG_WARNING,
 			"AdmirerSender::Run( "
@@ -112,31 +114,8 @@ bool AdmirerSender::Run() {
 			__TIME__
 			);
 
-	LogManager::GetLogManager()->Log(
-			LOG_MSG,
-			"AdmirerSender::Run( "
-			"miPort : %d, "
-			"miMaxClient : %d, "
-			"miMaxMemoryCopy : %d, "
-			"miMaxHandleThread : %d, "
-			"miMaxQueryPerThread : %d, "
-			"miTimeout : %d, "
-			"miStateTime, %d, "
-			"miDbCount : %d, "
-			"miLogLevel : %d, "
-			"mlogDir : %s "
-			")",
-			miPort,
-			miMaxClient,
-			miMaxMemoryCopy,
-			miMaxHandleThread,
-			miMaxQueryPerThread,
-			miTimeout,
-			miStateTime,
-			miDbCount,
-			miLogLevel,
-			mLogDir.c_str()
-			);
+	// print configure
+	PrintConfig();
 
 	bool bFlag = false;
 
@@ -228,7 +207,6 @@ bool AdmirerSender::Reload() {
 			mDbMan.mPasswd = conf.GetPrivate("DB", "DBPASS", "123456");
 			mDbMan.miMaxDatabaseThread = atoi(conf.GetPrivate("DB", "MAXDATABASETHREAD", "4").c_str());
 			mDbMan.miSyncTime = 60 * atoi(conf.GetPrivate("DB", "SYNCTIME", "30").c_str());
-			miDbCount = atoi(conf.GetPrivate("DB", "DB_COUNT", "0").c_str());
 
 			// [DB_EMAIL]
 			mDbEmail.mHost = conf.GetPrivate("DB_EMAIL", "DBHOST", "localhost");
@@ -238,19 +216,86 @@ bool AdmirerSender::Reload() {
 			mDbEmail.mPasswd = conf.GetPrivate("DB_EMAIL", "DBPASS", "123456");
 			mDbEmail.miMaxDatabaseThread = atoi(conf.GetPrivate("DB_EMAIL", "MAXDATABASETHREAD", "4").c_str());
 
-			char domain[4] = {'\0'};
-			for(int i = 0; i < miDbCount; i++) {
-				sprintf(domain, "DB_%d", i);
-				mDbLady[i].mHost = conf.GetPrivate(domain, "DBHOST", "localhost");
-				mDbLady[i].mPort = atoi(conf.GetPrivate(domain, "DBPORT", "3306").c_str());
-				mDbLady[i].mDbName = conf.GetPrivate(domain, "DBNAME", "qpidnetwork_online");
-				mDbLady[i].mUser = conf.GetPrivate(domain, "DBUSER", "root");
-				mDbLady[i].mPasswd = conf.GetPrivate(domain, "DBPASS", "123456");
-				mDbLady[i].miMaxDatabaseThread = atoi(conf.GetPrivate(domain, "MAXDATABASETHREAD", "4").c_str());
-				mDbLady[i].miSiteId = atoi(conf.GetPrivate(domain, "SITEID", "-1").c_str());
-				mDbLady[i].miOverValue = atoi(conf.GetPrivate(domain, "OVERVALUE", "0").c_str());
-				mDbLady[i].mPostfix = conf.GetPrivate(domain, "DBPOSTFIX", "");
-				mDbLady[i].mMember = conf.GetPrivate(domain, "MEMBER", "");
+			delete[] mDbLady;
+			mDbLady = NULL;
+
+			// [DB_%d]
+			miDbCount = 0;
+			list<string> listDbSpace;
+			char domain[64] = {'\0'};
+			int dbIndex = 0;
+			for(dbIndex = 0; ; dbIndex++) {
+				sprintf(domain, "DB_%d", dbIndex);
+				if (!conf.HasSpace(domain)) {
+					break;
+				}
+
+				int available = atoi(conf.GetPrivate(domain, "AVAILABLE", "0").c_str());
+				if (available == 1) {
+					miDbCount++;
+					listDbSpace.push_back(domain);
+				}
+			}
+
+			mDbLady = new DBSTRUCT[miDbCount];
+			dbIndex = 0;
+			for(list<string>::iterator iter = listDbSpace.begin();
+				iter != listDbSpace.end();
+				iter++)
+			{
+				string dbSpace = (*iter);
+				if (!conf.HasSpace(dbSpace.c_str())) {
+					break;
+				}
+
+				int available = atoi(conf.GetPrivate(dbSpace, "AVAILABLE", "0").c_str());
+				if (available == 1) {
+					mDbLady[dbIndex].mSpaceName = dbSpace;
+					mDbLady[dbIndex].mHost = conf.GetPrivate(dbSpace, "DBHOST", "localhost");
+					mDbLady[dbIndex].mPort = atoi(conf.GetPrivate(dbSpace, "DBPORT", "3306").c_str());
+					mDbLady[dbIndex].mDbName = conf.GetPrivate(dbSpace, "DBNAME", "qpidnetwork_online");
+					mDbLady[dbIndex].mUser = conf.GetPrivate(dbSpace, "DBUSER", "root");
+					mDbLady[dbIndex].mPasswd = conf.GetPrivate(dbSpace, "DBPASS", "123456");
+					mDbLady[dbIndex].miMaxDatabaseThread = atoi(conf.GetPrivate(dbSpace, "MAXDATABASETHREAD", "4").c_str());
+					mDbLady[dbIndex].miSiteId = atoi(conf.GetPrivate(dbSpace, "SITEID", "-1").c_str());
+					mDbLady[dbIndex].mSendStep = atoi(conf.GetPrivate(dbSpace, "SENDSTEP", "1").c_str());
+					mDbLady[dbIndex].miOverValue = atoi(conf.GetPrivate(dbSpace, "OVERVALUE", "0").c_str());
+					string defPaidRecv = conf.GetPrivate(dbSpace, "DEFAULT_PAID_MEM_RECV", "");
+					mDbLady[dbIndex].mDefPaidRecv = atoi(defPaidRecv.c_str());
+					string defFreeRecv = conf.GetPrivate(dbSpace, "DEFAULT_FREE_MEM_RECV", "");
+					mDbLady[dbIndex].mDefFreeRecv = atoi(defFreeRecv.c_str());
+					mDbLady[dbIndex].mDefPostfix = conf.GetPrivate(dbSpace, "DEFAULT_DBPOSTFIX", "");
+					mDbLady[dbIndex].mMember = conf.GetPrivate(dbSpace, "MEMBER", "");
+
+					char temp[64] = {'\0'};
+					for (int k = 0; ; k++) {
+						sprintf(temp, "C%d_REGEX", k);
+						string regex = conf.GetPrivate(dbSpace, temp, "");
+						if (!regex.empty()) {
+							DBRECVSTRUCT dbRecv;
+							dbRecv.mCondition = regex;
+
+							sprintf(temp, "C%d_PAID_MEM_RECV", k);
+							string paidManRecv = conf.GetPrivate(dbSpace, temp, defPaidRecv);
+							dbRecv.mPaidRecv = atoi(paidManRecv.c_str());
+
+							sprintf(temp, "C%d_FREE_MEM_RECV", k);
+							string freeManRecv = conf.GetPrivate(dbSpace, temp, defFreeRecv);
+							dbRecv.mFreeRecv = atoi(freeManRecv.c_str());
+
+							sprintf(temp, "C%d_DBPOSTFIX", k);
+							string postfix = conf.GetPrivate(dbSpace, temp, mDbLady[dbIndex].mDefPostfix);
+							dbRecv.mPostfix = postfix;
+
+							mDbLady[dbIndex].mRecvList.push_back(dbRecv);
+						}
+						else {
+							break;
+						}
+					}
+
+					dbIndex++;
+				}
 			}
 
 			// LOG
@@ -261,37 +306,236 @@ bool AdmirerSender::Reload() {
 			// Reload config
 			mClientTcpServer.SetHandleSize(miMaxMemoryCopy * miTimeout * miMaxQueryPerThread);
 
-			LogManager::GetLogManager()->Log(
-					LOG_WARNING,
-					"AdmirerSender::Reload( "
-					"miPort : %d, "
-					"miMaxClient : %d, "
-					"miMaxMemoryCopy : %d, "
-					"miMaxHandleThread : %d, "
-					"miMaxQueryPerThread : %d, "
-					"miTimeout : %d, "
-					"miStateTime, %d, "
-					"miDbCount : %d, "
-					"miLogLevel : %d, "
-					"mlogDir : %s "
-					")",
-					miPort,
-					miMaxClient,
-					miMaxMemoryCopy,
-					miMaxHandleThread,
-					miMaxQueryPerThread,
-					miTimeout,
-					miStateTime,
-					miDbCount,
-					miLogLevel,
-					mLogDir.c_str()
-					);
-
 			bFlag = true;
 		}
 	}
 	mConfigMutex.unlock();
 	return bFlag;
+}
+
+void AdmirerSender::PrintConfig()
+{
+	string confLog("");
+	char temp[64] = {0};
+
+	// --- [BASE]
+	confLog += "[BASE]";
+	confLog += "\n";
+	// miPort
+	snprintf(temp, sizeof(temp), "%d", miPort);
+	confLog += "miPort: ";
+	confLog += temp;
+	confLog += "\n";
+	// miMaxClient
+	snprintf(temp, sizeof(temp), "%d", miMaxClient);
+	confLog += "miMaxClient: ";
+	confLog += temp;
+	confLog += "\n";
+	// miMaxMemoryCopy
+	snprintf(temp, sizeof(temp), "%d", miMaxMemoryCopy);
+	confLog += "miMaxMemoryCopy: ";
+	confLog += temp;
+	confLog += "\n";
+	// miMaxHandleThread
+	snprintf(temp, sizeof(temp), "%d", miMaxHandleThread);
+	confLog += "miMaxHandleThread: ";
+	confLog += temp;
+	confLog += "\n";
+	// miMaxQueryPerThread
+	snprintf(temp, sizeof(temp), "%d", miMaxQueryPerThread);
+	confLog += "miMaxQueryPerThread: ";
+	confLog += temp;
+	confLog += "\n";
+	// miTimeout
+	snprintf(temp, sizeof(temp), "%d", miTimeout);
+	confLog += "miTimeout: ";
+	confLog += temp;
+	confLog += "\n";
+	// miStateTime
+	snprintf(temp, sizeof(temp), "%d", miStateTime);
+	confLog += "miStateTime: ";
+	confLog += temp;
+	confLog += "\n";
+	// return
+	confLog += "\n";
+
+	// --- [DB]
+	confLog += "[DB]";
+	confLog += "\n";
+	// mDbMan.mHost
+	confLog += "mDbMan.mHost: ";
+	confLog += mDbMan.mHost;
+	confLog += "\n";
+	// mDbMan.mPort
+	snprintf(temp, sizeof(temp), "%d", mDbMan.mPort);
+	confLog += "mDbMan.mPort: ";
+	confLog += temp;
+	confLog += "\n";
+	// mDbMan.mDbName
+	confLog += "mDbMan.mDbName: ";
+	confLog += mDbMan.mDbName;
+	confLog += "\n";
+	// mDbMan.mUser
+	confLog += "mDbMan.mUser: ";
+	confLog += mDbMan.mUser;
+	confLog += "\n";
+	// mDbMan.mPasswd
+	confLog += "mDbMan.mPasswd: ";
+	confLog += mDbMan.mPasswd;
+	confLog += "\n";
+	// mDbMan.miMaxDatabaseThread
+	snprintf(temp, sizeof(temp), "%d", mDbMan.miMaxDatabaseThread);
+	confLog += "mDbMan.miMaxDatabaseThread: ";
+	confLog += temp;
+	confLog += "\n";
+	// mDbMan.miSyncTime
+	snprintf(temp, sizeof(temp), "%d", mDbMan.miSyncTime);
+	confLog += "mDbMan.miSyncTime: ";
+	confLog += temp;
+	confLog += "\n";
+	// return
+	confLog += "\n";
+
+	// --- [DB_EMAIL]
+	confLog += "[DB_EMAIL]";
+	confLog += "\n";
+	// mDbEmail.mHost
+	confLog += "mDbEmail.mHost: ";
+	confLog += mDbEmail.mHost;
+	confLog += "\n";
+	// mDbEmail.mPort
+	snprintf(temp, sizeof(temp), "%d", mDbEmail.mPort);
+	confLog += "mDbEmail.mPort: ";
+	confLog += temp;
+	confLog += "\n";
+	// mDbEmail.mDbName
+	confLog += "mDbEmail.mDbName: ";
+	confLog += mDbEmail.mDbName;
+	confLog += "\n";
+	// mDbEmail.mUser
+	confLog += "mDbEmail.mUser: ";
+	confLog += mDbEmail.mUser;
+	confLog += "\n";
+	// mDbEmail.mPasswd
+	confLog += "mDbEmail.mPasswd: ";
+	confLog += mDbEmail.mPasswd;
+	confLog += "\n";
+	// mDbEmail.miMaxDatabaseThread
+	snprintf(temp, sizeof(temp), "%d", mDbEmail.miMaxDatabaseThread);
+	confLog += "mDbEmail.miMaxDatabaseThread: ";
+	confLog += temp;
+	confLog += "\n";
+	// return
+	confLog += "\n";
+
+	// --- [DB_%d]
+	for (int dbIndex = 0; dbIndex < miDbCount; dbIndex++)
+	{
+		// space name
+		confLog += "[";
+		confLog += mDbLady[dbIndex].mSpaceName;
+		confLog += "]";
+		confLog += "\n";
+		// mHost
+		confLog += "mHost: ";
+		confLog += mDbLady[dbIndex].mHost;
+		confLog += "\n";
+		// mPost
+		snprintf(temp, sizeof(temp), "%d", mDbLady[dbIndex].mPort);
+		confLog += "mPost: ";
+		confLog += temp;
+		confLog += "\n";
+		// mDbName
+		confLog += "mDbName: ";
+		confLog += mDbLady[dbIndex].mDbName;
+		confLog += "\n";
+		// mUser
+		confLog += "mUser: ";
+		confLog += mDbLady[dbIndex].mUser;
+		confLog += "\n";
+		// mPasswd
+		confLog += "mPasswd: ";
+		confLog += mDbLady[dbIndex].mPasswd;
+		confLog += "\n";
+		// miMaxDatabaseThread
+		snprintf(temp, sizeof(temp), "%d", mDbLady[dbIndex].miMaxDatabaseThread);
+		confLog += "miMaxDatabaseThread: ";
+		confLog += temp;
+		confLog += "\n";
+		// miSiteId
+		snprintf(temp, sizeof(temp), "%d", mDbLady[dbIndex].miSiteId);
+		confLog += "miSiteId: ";
+		confLog += temp;
+		confLog += "\n";
+		// mSendStep
+		snprintf(temp, sizeof(temp), "%d", mDbLady[dbIndex].mSendStep);
+		confLog += "mSendStep: ";
+		confLog += temp;
+		confLog += "\n";
+		// miOverValue
+		snprintf(temp, sizeof(temp), "%d", mDbLady[dbIndex].miOverValue);
+		confLog += "miOverValue: ";
+		confLog += temp;
+		confLog += "\n";
+		// mDefPaidRecv
+		snprintf(temp, sizeof(temp), "%d", mDbLady[dbIndex].mDefPaidRecv);
+		confLog += "mDefPaidRecv: ";
+		confLog += temp;
+		confLog += "\n";
+		// mDefFreeRecv
+		snprintf(temp, sizeof(temp), "%d", mDbLady[dbIndex].mDefFreeRecv);
+		confLog += "mDefFreeRecv: ";
+		confLog += temp;
+		confLog += "\n";
+		// mDefPostfix
+		confLog += "mDefPostfix: ";
+		confLog += mDbLady[dbIndex].mDefPostfix;
+		confLog += "\n";
+		// mMember
+		confLog += "mMember: ";
+		confLog += mDbLady[dbIndex].mMember;
+		confLog += "\n";
+
+		// condition
+		if (!mDbLady[dbIndex].mRecvList.empty())
+		{
+			confLog += "--------\n";
+			for (DBRECVLIST::const_iterator iter = mDbLady[dbIndex].mRecvList.begin();
+				iter != mDbLady[dbIndex].mRecvList.end();
+				iter++)
+			{
+				// mCondition
+				confLog += "mCondition: ";
+				confLog += (*iter).mCondition;
+				confLog += "\n";
+				// mPaidRecv
+				snprintf(temp, sizeof(temp), "%d", (*iter).mPaidRecv);
+				confLog += "mPaidRecv: ";
+				confLog += temp;
+				confLog += "\n";
+				// mFreeRecv
+				snprintf(temp, sizeof(temp), "%d", (*iter).mFreeRecv);
+				confLog += "mFreeRecv: ";
+				confLog += temp;
+				confLog += "\n";
+				// mPostfix
+				confLog += "mPostfix: ";
+				confLog += (*iter).mPostfix;
+				confLog += "\n";
+				// return
+				confLog += "----\n";
+			}
+			confLog += "--------\n";
+		}
+
+		// return
+		confLog += "\n";
+	}
+
+	LogManager::GetLogManager()->Log(LOG_ERR_SYS, "AdmirerSender::PrintConfig()\n"
+			"%s",
+			confLog.c_str()
+			);
 }
 
 bool AdmirerSender::IsRunning() {
@@ -472,18 +716,20 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 		if( type == GET ) {
 			if( strcmp(pPath, "/SYNCLADYLIST") == 0 ) {
 				// 增量获取发送女士
+				const char* pSiteId = dataHttpParser.GetParam("SITEID").c_str();
 				LogManager::GetLogManager()->Log(
 						LOG_WARNING,
 						"AdmirerSender::HandleRecvMessage( "
 						"tid : %d, "
-						"[收到请求, 增量获取发送女士] "
+						"[收到请求, 增量获取发送女士], "
+						"pSiteId : %s "
 						")",
-						(int)syscall(SYS_gettid)
+						(int)syscall(SYS_gettid),
+						pSiteId
 						);
 
-				const char* pSiteId = dataHttpParser.GetParam("SITEID").c_str();
 				if( pSiteId != NULL ) {
-					SyncLadyList(pSiteId, m);
+					SyncLadyList(pSiteId);
 
 					rootSend["ret"] = 1;
 					ret = 1;
@@ -506,25 +752,36 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 
 				if( pAgentId != NULL ) {
 					Json::Value statusNode;
-					GetAgentSendStatus(statusNode, (char*)pAgentId, m);
+					GetAgentSendStatus(statusNode, (char*)pAgentId);
 
 					rootSend["status"] = statusNode;
 					rootSend["ret"] = 1;
 					ret = 1;
 				}
+
 				param = writer.write(rootSend);
 
 			} else if( strcmp(pPath, "/CLEARLETTERSENDLIST") == 0 ) {
+				const char* pClearTime = dataHttpParser.GetParam("CLEARTIME").c_str();
 				LogManager::GetLogManager()->Log(
 						LOG_WARNING,
 						"AdmirerSender::HandleRecvMessage( "
 						"tid : %d, "
-						"[收到请求, 清空发送女士] "
+						"[收到请求, 清空发送女士], "
+						"pClearTime : %s "
 						")",
-						(int)syscall(SYS_gettid)
+						(int)syscall(SYS_gettid),
+						pClearTime
 						);
 
-				ClearLetterSendList(m);
+				// 处理
+				long long iClearTime = 0;
+				if( pClearTime != NULL ) {
+					iClearTime = atoll(pClearTime);
+				}
+				ClearLetterSendList(iClearTime);
+
+				// 回复
 				rootSend["ret"] = 1;
 				ret = 1;
 				param = writer.write(rootSend);
@@ -600,18 +857,15 @@ int AdmirerSender::HandleTimeoutMessage(Message *m, Message *sm) {
 }
 
 void AdmirerSender::SyncLadyList(
-		const char* siteId,
-		Message *m
+		const char* siteId
 		) {
 	LogManager::GetLogManager()->Log(
 			LOG_MSG,
 			"AdmirerSender::SyncLadyList( "
 			"tid : %d, "
-			"m->fd: [%d], "
 			"siteId : %s "
 			")",
 			(int)syscall(SYS_gettid),
-			m->fd,
 			siteId
 			);
 
@@ -620,19 +874,16 @@ void AdmirerSender::SyncLadyList(
 
 void AdmirerSender::GetAgentSendStatus(
 		Json::Value& statusNode,
-		const char* agentId,
-		Message *m
+		const char* agentId
 		) {
 	LogManager::GetLogManager()->Log(
 			LOG_MSG,
 			"AdmirerSender::GetAgentSendStatus( "
 			"tid : %d, "
-			"m->fd: [%d], "
 			"agentId : %s, "
 			"start "
 			")",
 			(int)syscall(SYS_gettid),
-			m->fd,
 			agentId
 			);
 	bool bFlag = false;
@@ -650,12 +901,10 @@ void AdmirerSender::GetAgentSendStatus(
 			LOG_MSG,
 			"AdmirerSender::GetAgentSendStatus( "
 			"tid : %d, "
-			"m->fd: [%d], "
 			"agentId : %s, "
 			"end "
 			")",
 			(int)syscall(SYS_gettid),
-			m->fd,
 			agentId
 			);
 
@@ -663,16 +912,16 @@ void AdmirerSender::GetAgentSendStatus(
 }
 
 void AdmirerSender::ClearLetterSendList(
-		Message *m
+		long long timestamp
 		) {
 	LogManager::GetLogManager()->Log(
 			LOG_MSG,
 			"AdmirerSender::ClearLetterSendList( "
-			"tid : %d, "
-			"m->fd: [%d] "
+			"tid : %d "
+			"timestamp : %lld "
 			")",
 			(int)syscall(SYS_gettid),
-			m->fd
+			timestamp
 			);
 //	bool bFlag = false;
 
@@ -734,108 +983,108 @@ void AdmirerSender::OnGetLady(
 		DBManager* pDBManager,
 		const Lady& item
 		) {
-	// 发送信件(三期)
-	LogManager::GetLogManager()->Log(
-			LOG_STAT,
-			"AdmirerSender::OnGetLady( "
-			"tid : %d, "
-			"womanid : %s, "
-			"siteid : %d, "
-			"sort : %d "
-			")",
-			(int)syscall(SYS_gettid),
-			item.mWomanId.c_str(),
-			item.mSiteId,
-			item.iSort
-			);
-
-	mLadyLetterSendListMap.Lock();
-	LadyLetterSendListMap::iterator itr = mLadyLetterSendListMap.Find(item.mWomanId);
-	if( itr != mLadyLetterSendListMap.End() ) {
-		ILetterSender* sender = itr->second.PopFront();
-		if( sender != NULL ) {
-			unsigned int iHandleTime = GetTickCount();
-
-			bool bFlag = sender->CanSendLetter();
-			if( bFlag ) {
-				// Send letter
-				bFlag = sender->SendLetter();
-
-				if( !bFlag ) {
-					// Check error code
-					switch( sender->GetErrorCode() ) {
-					case SEND_FIAL_TOO_MORE_TIME: {
-						// Can't send any more
-
-					}break;
-					default:{
-						bFlag = true;
-
-					}break;
-					}
-				}
-
-			}
-
-			if( bFlag ) {
-				// Push back into send list
-				itr->second.PushBack(sender);
-
-			} else {
-				// Can't send any more
-				sender->FinishLetter();
-
-				// Remove sender from Agent
-//				RemoveLadyFromAgent(item.mAgentId);
-
-				// Drop sender
-				delete sender;
-				sender = NULL;
-
-				if( itr->second.Empty() ) {
-					// 在内存表更新女士能否收信(三期)
-					mDBManager.UpdateLadyCanSend(itr->first, false);
-
-					// 删除女士(三期)
-					mLadyLetterSendListMap.Erase(itr);
-				}
-
-			}
-
-			iHandleTime =  GetTickCount() - iHandleTime;
-
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"AdmirerSender::OnGetLady( "
-					"tid : %d, "
-					"iHandleTime : %u ms "
-					")",
-					(int)syscall(SYS_gettid),
-					iHandleTime
-					);
-
-			LogManager::GetLogManager()->Log(
-					LOG_STAT,
-					"AdmirerSender::OnGetLady( "
-					"tid : %d "
-					"######################################## "
-					")",
-					(int)syscall(SYS_gettid)
-					);
-
-			iHandleTime = MAX(50 * 1000, iHandleTime);
-			iHandleTime = MIN(1000 * 1000, iHandleTime);
-
-			usleep(iHandleTime);
-
-		} else {
-			// Noting to send
-			sleep(1);
-
-		}
-
-	}
-	mLadyLetterSendListMap.Unlock();
+//	// 发送信件(三期)
+//	LogManager::GetLogManager()->Log(
+//			LOG_STAT,
+//			"AdmirerSender::OnGetLady( "
+//			"tid : %d, "
+//			"womanid : %s, "
+//			"siteid : %d, "
+//			"sort : %d "
+//			")",
+//			(int)syscall(SYS_gettid),
+//			item.mWomanId.c_str(),
+//			item.mSiteId,
+//			item.iSort
+//			);
+//
+//	mLadyLetterSendListMap.Lock();
+//	LadyLetterSendListMap::iterator itr = mLadyLetterSendListMap.Find(item.mWomanId);
+//	if( itr != mLadyLetterSendListMap.End() ) {
+//		ILetterSender* sender = itr->second.PopFront();
+//		if( sender != NULL ) {
+//			unsigned int iHandleTime = GetTickCount();
+//
+//			bool bFlag = sender->CanSendLetter();
+//			if( bFlag ) {
+//				// Send letter
+//				bFlag = sender->SendLetter();
+//
+//				if( !bFlag ) {
+//					// Check error code
+//					switch( sender->GetErrorCode() ) {
+//					case SEND_FIAL_TOO_MORE_TIME: {
+//						// Can't send any more
+//
+//					}break;
+//					default:{
+//						bFlag = true;
+//
+//					}break;
+//					}
+//				}
+//
+//			}
+//
+//			if( bFlag ) {
+//				// Push back into send list
+//				itr->second.PushBack(sender);
+//
+//			} else {
+//				// Can't send any more
+//				sender->FinishLetter();
+//
+//				// Remove sender from Agent
+////				RemoveLadyFromAgent(item.mAgentId);
+//
+//				// Drop sender
+//				delete sender;
+//				sender = NULL;
+//
+//				if( itr->second.Empty() ) {
+//					// 在内存表更新女士能否收信(三期)
+//					mDBManager.UpdateLadyCanSend(itr->first, false);
+//
+//					// 删除女士(三期)
+//					mLadyLetterSendListMap.Erase(itr);
+//				}
+//
+//			}
+//
+//			iHandleTime =  GetTickCount() - iHandleTime;
+//
+//			LogManager::GetLogManager()->Log(
+//					LOG_STAT,
+//					"AdmirerSender::OnGetLady( "
+//					"tid : %d, "
+//					"iHandleTime : %u ms "
+//					")",
+//					(int)syscall(SYS_gettid),
+//					iHandleTime
+//					);
+//
+//			LogManager::GetLogManager()->Log(
+//					LOG_STAT,
+//					"AdmirerSender::OnGetLady( "
+//					"tid : %d "
+//					"######################################## "
+//					")",
+//					(int)syscall(SYS_gettid)
+//					);
+//
+//			iHandleTime = MAX(50 * 1000, iHandleTime);
+//			iHandleTime = MIN(1000 * 1000, iHandleTime);
+//
+//			usleep(iHandleTime);
+//
+//		} else {
+//			// Noting to send
+//			sleep(1);
+//
+//		}
+//
+//	}
+//	mLadyLetterSendListMap.Unlock();
 
 }
 
@@ -1003,92 +1252,120 @@ void AdmirerSender::SendRunnableHandle() {
 			(int)syscall(SYS_gettid)
 			);
 
+	list<Lady> ladyList;
 	while( IsRunning() ) {
 		// 发送信件(三期)
-		if( !mDBManager.GetLadyList() ) {
+		if( !mDBManager.GetLadyList(ladyList) ) {
 			// Noting to send
 			sleep(1);
-		}
 
-//		// 发送信件(二期)
-//		ILetterSender* sender = mLadyLetterList.PopFront();
-//		if( sender != NULL ) {
-//			LogManager::GetLogManager()->Log(
-//					LOG_STAT,
-//					"AdmirerSender::SendRunnableHandle( "
-//					"tid : %d, "
-//					"start "
-//					")",
-//					(int)syscall(SYS_gettid)
-//					);
-//
-//			unsigned int iHandleTime = GetTickCount();
-//
-//			bool bFlag = sender->CanSendLetter();
-//			if( bFlag ) {
-//				// Send letter
-//				bFlag = sender->SendLetter();
-//
-//				if( !bFlag ) {
-//					// Check error code
-//					switch( sender->GetErrorCode() ) {
-//					case SEND_FIAL_TOO_MORE_TIME: {
-//						// Can't send any more
-//					}break;
-//					default:{
-//						bFlag = true;
-//					}break;
-//					}
-//				}
-//
-//			}
-//
-//			if( bFlag ) {
-//				// Push back into send list
-//				mLadyLetterList.PushBack(sender);
-//
-//			} else {
-//				// Can't send any more
-//				sender->FinishLetter();
-//
-//				// Remove sender from Agent
-//				RemoveLadyFromAgent(sender->GetAgentId());
-//
-//				// Drop sender
-//				delete sender;
-//				sender = NULL;
-//			}
-//
-//			iHandleTime =  GetTickCount() - iHandleTime;
-//
-//			LogManager::GetLogManager()->Log(
-//					LOG_STAT,
-//					"AdmirerSender::SendRunnableHandle( "
-//					"tid : %d, "
-//					"iHandleTime : %u ms, "
-//					"end "
-//					")",
-//					(int)syscall(SYS_gettid),
-//					iHandleTime
-//					);
-//
-//			LogManager::GetLogManager()->Log(
-//					LOG_STAT,
-//					"AdmirerSender::SendRunnableHandle( "
-//					"tid : %d "
-//					"######################################## "
-//					")",
-//					(int)syscall(SYS_gettid)
-//					);
-//
-//			iHandleTime = MAX(50, iHandleTime);
-//			iHandleTime = MIN(1000, iHandleTime);
-//
-//			usleep(iHandleTime);
-//
-//		} else {
-//			// Noting to send
-//			sleep(1);
-//		}
+		} else {
+			for(list<Lady>::iterator itrLady = ladyList.begin(); itrLady != ladyList.end(); itrLady++) {
+				Lady item = *itrLady;
+
+				// 发送信件(三期)
+				LogManager::GetLogManager()->Log(
+						LOG_STAT,
+						"AdmirerSender::SendRunnableHandle( "
+						"tid : %d, "
+						"womanid : %s, "
+						"siteid : %d, "
+						"sort : %d "
+						")",
+						(int)syscall(SYS_gettid),
+						item.mWomanId.c_str(),
+						item.mSiteId,
+						item.iSort
+						);
+
+				mLadyLetterSendListMap.Lock();
+				LadyLetterSendListMap::iterator itr = mLadyLetterSendListMap.Find(item.mWomanId);
+				if( itr != mLadyLetterSendListMap.End() ) {
+					ILetterSender* sender = itr->second.PopFront();
+					if( sender != NULL ) {
+						unsigned int iHandleTime = GetTickCount();
+
+						bool bFlag = sender->CanSendLetter();
+						if( bFlag ) {
+							// Send letter
+							bFlag = sender->SendLetter();
+
+							if( !bFlag ) {
+								// Check error code
+								switch( sender->GetErrorCode() ) {
+								case SEND_FIAL_TOO_MORE_TIME: {
+									// Can't send any more
+
+								}break;
+								default:{
+									bFlag = true;
+
+								}break;
+								}
+							}
+
+						}
+
+						if( bFlag ) {
+							// Push back into send list
+							itr->second.PushBack(sender);
+
+						} else {
+							// Can't send any more
+							sender->FinishLetter();
+
+							// Remove sender from Agent
+			//				RemoveLadyFromAgent(item.mAgentId);
+
+							// Drop sender
+							delete sender;
+							sender = NULL;
+
+							if( itr->second.Empty() ) {
+								// 在内存表更新女士能否收信(三期)
+								mDBManager.UpdateLadyCanSend(itr->first, false);
+
+								// 删除女士(三期)
+								mLadyLetterSendListMap.Erase(itr);
+							}
+
+						}
+
+						iHandleTime =  GetTickCount() - iHandleTime;
+
+						LogManager::GetLogManager()->Log(
+								LOG_STAT,
+								"AdmirerSender::SendRunnableHandle( "
+								"tid : %d, "
+								"iHandleTime : %u ms "
+								")",
+								(int)syscall(SYS_gettid),
+								iHandleTime
+								);
+
+						LogManager::GetLogManager()->Log(
+								LOG_STAT,
+								"AdmirerSender::SendRunnableHandle( "
+								"tid : %d "
+								"######################################## "
+								")",
+								(int)syscall(SYS_gettid)
+								);
+
+						iHandleTime = MAX(50 * 1000, iHandleTime);
+						iHandleTime = MIN(1000 * 1000, iHandleTime);
+
+						usleep(iHandleTime);
+
+					} else {
+						// Noting to send
+						sleep(1);
+
+					}
+
+				}
+				mLadyLetterSendListMap.Unlock();
+			}
+		}
 	}
 }

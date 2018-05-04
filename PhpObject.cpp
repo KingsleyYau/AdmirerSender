@@ -330,6 +330,26 @@ PhpObject& PhpObject::Append(const PhpObject& obj) {
 	return mPhpObjectList.back();
 }
 
+PhpObject& PhpObject::Append(const PhpObject& obj, int index) {
+	mObjectType = ObjectTypeArray;
+	PhpSubObjectList::iterator itr = mPhpObjectList.begin();
+	for(int i = 0; itr != mPhpObjectList.end(); i++) {
+		if(i == index) {
+			PhpSubObjectList::iterator newItr = mPhpObjectList.insert(itr, obj);
+			break;
+		} else {
+			itr++;
+		}
+	}
+
+	if( itr == mPhpObjectList.end() ) {
+		mPhpObjectList.push_back(obj);
+		itr = mPhpObjectList.end();
+	}
+
+	return *itr;
+}
+
 PhpObject& PhpObject::Append(string value) {
 	mObjectType = ObjectTypeArray;
 	mPhpObjectList.push_back(PhpObject(value));

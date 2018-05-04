@@ -53,6 +53,9 @@ class ConfFile
         //get the value by key and space
         string GetPrivate(const string& strSpace, const string& strKey, const string& strDefault);
         string GetPrivate(const char* pcSpace, const char* pcKey, const char* pcDefault);
+        //has space
+        bool HasSpace(const string& strSpace);
+        bool HasSpace(const char* pcSpace);
         //set the value by key and space, it would input a new space if specify space not be found
         bool SetPrivate(const string& strSpace, const string& strKey, const string& strValue);
         bool SetPrivate(const char* pcSpace, const char* pcKey, const char* pcValue);

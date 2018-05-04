@@ -50,6 +50,7 @@ public:
 	 * Add object to array
 	 */
 	PhpObject& Append(const PhpObject& obj);
+	PhpObject& Append(const PhpObject& obj, int index);
 	PhpObject& Append(string value);
 
 	/**

@@ -30,6 +30,7 @@ public:
 		at_content_cn = item.at_content_cn;
 		templateType = item.templateType;
 		vg_id = item.vg_id;
+		at_code = item.at_code;
 		std::copy(item.attachmentList.begin(), item.attachmentList.end(), std::back_inserter(attachmentList));
 	}
 
@@ -41,6 +42,7 @@ public:
 		at_content_cn = item.at_content_cn;
 		templateType = item.templateType;
 		vg_id = item.vg_id;
+		at_code = item.at_code;
 		std::copy(item.attachmentList.begin(), item.attachmentList.end(), std::back_inserter(attachmentList));
 		return *this;
 	}
@@ -53,6 +55,7 @@ public:
 		at_content_cn = "";
 		templateType = "";
 		vg_id = "";
+		at_code = "";
 		attachmentList.clear();
 	}
 
@@ -63,6 +66,7 @@ public:
 	string at_content_cn;
 	string templateType;
 	string vg_id;
+	string at_code;
 
 	// 附件
 	list<string> attachmentList;

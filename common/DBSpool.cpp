@@ -6,6 +6,7 @@
  */
 
 #include "DBSpool.hpp"
+#include "LogManager.h"
 
 //the follow class use as database connection spool
 DBSpool::DBSpool()
@@ -395,7 +396,7 @@ bool DBConnection::Connect()
 
 #ifdef CLN_UTF8
     if (m_pSQLConn) {
-        mysql_query(m_pSQLConn, "set names utf8");//���ÿͻ����ַ�
+        mysql_query(m_pSQLConn, "set names utf8");
     }
 #endif
 
@@ -425,7 +426,7 @@ int DBConnection::ExecuteSQL(const string& strSQL, MYSQL_RES** res, int& iRelt, 
     	if( m_pSQLConn != NULL ) {
         	if( mysql_ping(m_pSQLConn) != 0 ) {
                 bTest = false;
-        		if(!bHasUnlock) Unlock();//�Ƚ�����ΪConnect�е�DisConnect��TestIdle��Ҫ����
+        		if(!bHasUnlock) Unlock();
         		bHasUnlock = true;
                 if (Connect()){
                     bTest = true;
@@ -439,7 +440,7 @@ int DBConnection::ExecuteSQL(const string& strSQL, MYSQL_RES** res, int& iRelt, 
 
     	} else {
             bTest = false;
-    		if(!bHasUnlock) Unlock();//�Ƚ�����ΪConnect�е�DisConnect��TestIdle��Ҫ����
+    		if(!bHasUnlock) Unlock();
     		bHasUnlock = true;
             if (Connect()){
                 bTest = true;
@@ -454,6 +455,18 @@ int DBConnection::ExecuteSQL(const string& strSQL, MYSQL_RES** res, int& iRelt, 
         return SQL_TYPE_UNKNOW;
     }
     if (mysql_query(m_pSQLConn, strSQL.c_str()) != 0){
+    	// print error
+    	const char* error = mysql_error(m_pSQLConn);
+    	LogManager::GetLogManager()->Log(
+    				LOG_ERR_USER,
+    				"DBConnection::ExecuteSQL( "
+    				"[执行SQL语句失败], "
+    				"error : %s, "
+    				"sql : %s"
+    				")",
+    				NULL!=error ? error : "Unknow",
+    				strSQL.c_str()
+    				);
         return SQL_TYPE_UNKNOW;
     }
     int iType = SQLtype(strSQL);

@@ -59,7 +59,7 @@ public:
 		pthread_rwlock_rdlock(&mLock);
 		size = mSize;
 		pthread_rwlock_unlock(&mLock);
-		return mSize;
+		return size;
 	}
 
 private:

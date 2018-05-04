@@ -107,6 +107,31 @@ bool ConfFile::LoadConfFile()
     return true;
 }
 
+//has space
+bool ConfFile::HasSpace(const string& strSpace)
+{
+	bool result = false;
+	string strSpaceKey = strSpace + "\t";
+	for (ConfMap::iterator iter = m_MapFileSet.begin();
+		iter != m_MapFileSet.end();
+		iter++)
+	{
+		if (strSpaceKey.length() < (*iter).first.length()) {
+			if (0 == memcmp(strSpaceKey.c_str(), (*iter).first.c_str(), strSpaceKey.length())) {
+				result = true;
+				break;
+			}
+		}
+	}
+	return result;
+}
+
+bool ConfFile::HasSpace(const char* pcSpace)
+{
+	string strSpace = pcSpace;
+	return HasSpace(strSpace);
+}
+
 string ConfFile::GetPrivate(const string& strSpace, const string& strKey, const string& strDefault)
 {
     string strSpaceKey = strSpace + "\t" + strKey;
