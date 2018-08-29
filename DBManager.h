@@ -18,6 +18,9 @@
 #include <common/StringHandle.h>
 #include <common/KThread.h>
 #include <common/DBSpool.hpp>
+#include <common/Math.h>
+
+#include <json/json/json.h>
 
 #include <sqlite3.h>
 
@@ -158,9 +161,19 @@ public:
 	bool UpdateLadyCanSend(const string& womanId, bool bCanSend);
 
 	/**
+	 * 获取内存表允许收信男士Id字符串
+	 */
+	string GetManCanRecvIdString();
+
+	/**
 	 * 获取内存表允许收信男士数量
 	 */
 	int GetManCanRecvCount();
+
+	/**
+	 * 获取内存表允许收信男士数量字符串
+	 */
+	string GetManCanRecvCountString();
 
 private:
 	/****************************** 功能函数start ***********************************************/
@@ -179,9 +192,10 @@ private:
 
 	/**
 	 * 过滤特殊字符
-	 * @param
+	 * 只过滤 \'
+	 * @param 源sql
 	 */
-	string SqlTransfer(const string& sql);
+	string SqlTransferInsert(const string& sql);
 
 	/**
 	 * php加密算法

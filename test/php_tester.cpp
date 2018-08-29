@@ -18,12 +18,14 @@
 using namespace std;
 
 #include "../PhpObject.h"
+#include "../common/StringHandle.h"
 
 #define VERSION_STRING "1.0.0"
 
 string fileString = "";
 
 bool Parse(int argc, char *argv[]);
+string SqlTransfer(const string& sql);
 
 int main(int argc, char *argv[]) {
 	printf("############## php_tester ############## \n");
@@ -80,8 +82,6 @@ int main(int argc, char *argv[]) {
 				 printf("# PhpObject UnSerialize : \n%s\n\n\n", serializeString.c_str());
 
 				 if( obj.UnSerialize(serializeString) ) {
-					 printf("# PhpObject UnSerialize success \n");
-
 					 PhpObject objNew;
 					 PhpObject objAdd;
 					 objAdd["womanid"] = "123456";
@@ -95,9 +95,11 @@ int main(int argc, char *argv[]) {
 						 objNew.Append(objAdd, 0);
 						 objNew.Append(obj);
 					 }
+//					 string serializeStringNew = objNew.Serialize();
+//					 printf("# PhpObject Serialize : \n%s\n\n\n", serializeStringNew.c_str());
 
-					 string serializeStringNew = objNew.Serialize();
-					 printf("# PhpObject Serialize : \n%s\n\n\n", serializeStringNew.c_str());
+					 string sql = SqlTransfer(obj.Serialize());
+					 printf("# PhpObject Serialize sql : \n%s\n\n\n", sql.c_str());
 
 				 } else {
 					 printf("# PhpObject UnSerialize fail \n");
@@ -130,4 +132,15 @@ bool Parse(int argc, char *argv[]) {
 	}
 
 	return true;
+}
+
+string SqlTransfer(const string& sql) {
+	string result = "";
+
+	result = StringHandle::replace(sql, "\\", "\\\\");
+	result = StringHandle::replace(result, "'", "\\'");
+//	result = StringHandle::replace(result, "%", "\\%");
+//	result = StringHandle::replace(result, "_", "\\_");
+
+	return result;
 }

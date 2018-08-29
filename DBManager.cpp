@@ -1253,10 +1253,14 @@ bool DBManager::CanRecvLetter(
 			LOG_STAT,
 			"DBManager::CanRecvLetter( "
 			"tid : %d, "
+			"womanId : %s, "
+			"manId : %s, "
 			"bFlag : %s, "
 			"iHandleTime : %u ms "
 			")",
 			(int)syscall(SYS_gettid),
+			lady.mWomanId.c_str(),
+			man.manId.c_str(),
 			bFlag?"true":"false",
 			iHandleTime
 			);
@@ -1722,7 +1726,7 @@ bool DBManager::SendLetter2Man(
 		body += (admireTemplate.at_show_cn == "Y" && admireTemplate.at_content_cn.length() > 0)?admireTemplate.at_content_cn:"";
 
 		admirebody = admireTemplate.at_content_en;
-		admirebody += (admireTemplate.at_show_cn  == "Y" && admireTemplate.at_content_cn.length() > 0)?(line + admireTemplate.at_content_cn):"";
+		admirebody += (admireTemplate.at_show_cn == "Y" && admireTemplate.at_content_cn.length() > 0)?(line + admireTemplate.at_content_cn):"";
 
 		LogManager::GetLogManager()->Log(
 				LOG_MSG,
@@ -1825,10 +1829,10 @@ bool DBManager::SendLetter2Man(
 				";",
 				iInsertId,
 				womanId.c_str(),
-				SqlTransfer(womanName).c_str(),
+				SqlTransferInsert(womanName).c_str(),
 				admireTemplate.at_code.c_str(),
 				manId.c_str(),
-				SqlTransfer(manName).c_str(),
+				SqlTransferInsert(manName).c_str(),
 				agentId.c_str(),
 				agentStaff.c_str(),
 				(int)admireTemplate.attachmentList.size(),
@@ -1897,8 +1901,8 @@ bool DBManager::SendLetter2Man(
 				"attachment = '%s' "
 				";",
 				iInsertId,
-				SqlTransfer(body).c_str(),
-				SqlTransfer(review_history).c_str(),
+				SqlTransferInsert(body).c_str(),
+				SqlTransferInsert(review_history).c_str(),
 				ip.c_str(),
 				computerId.c_str(),
 				attachmentListText.c_str()
@@ -2336,7 +2340,7 @@ bool DBManager::UpdateMsgProcessList(const Man& man, const Lady& lady) {
 			LOG_STAT,
 			"DBManager::UpdateMsgProcessList( "
 			"tid : %d, "
-			"[以前审核功能的部分代码,以前需要审核信件，现在不需要，摘必须功能], "
+			"[以前审核功能的部分代码, 以前需要审核信件, 现在不需要，摘必须功能], "
 			"manId : %s, "
 			"siteId : %d "
 			")",
@@ -2376,7 +2380,7 @@ bool DBManager::UpdateMsgProcessList(const Man& man, const Lady& lady) {
 				LOG_MSG,
 				"DBManager::UpdateMsgProcessList( "
 				"tid : %d, "
-				"[以前审核功能的部分代码,以前需要审核信件，现在不需要，摘必须功能], "
+				"[以前审核功能的部分代码, 以前需要审核信件, 现在不需要, 摘必须功能], "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
@@ -2391,7 +2395,7 @@ bool DBManager::UpdateMsgProcessList(const Man& man, const Lady& lady) {
 					LOG_ERR_USER,
 					"DBManager::UpdateMsgProcessList( "
 					"tid : %d, "
-					"[以前审核功能的部分代码,以前需要审核信件，现在不需要，摘必须功能, 失败], "
+					"[以前审核功能的部分代码, 以前需要审核信件, 现在不需要, 摘必须功能, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -2406,7 +2410,7 @@ bool DBManager::UpdateMsgProcessList(const Man& man, const Lady& lady) {
 			LOG_STAT,
 			"DBManager::UpdateMsgProcessList( "
 			"tid : %d, "
-			"[以前审核功能的部分代码,以前需要审核信件，现在不需要，摘必须功能], "
+			"[以前审核功能的部分代码, 以前需要审核信件, 现在不需要, 摘必须功能], "
 			"bFlag : %s, "
 			"iHandleTime : %u ms, "
 			"end "
@@ -2476,7 +2480,7 @@ bool DBManager::UpdateEmailSystem(
 		phpObjectWomanInfo["height"]   		= lady.height;
 		phpObjectWomanInfo["weight"]   		= lady.weight;
 		phpObjectWomanInfo["marry"]     	= lady.marry;
-		phpObjectWomanInfo["admireInfo"]	= SqlTransfer(admireBody.substr(0, 200));
+		phpObjectWomanInfo["admireInfo"]	= admireBody.substr(0, 200);
 		char temp[64];
 		sprintf(temp, "%lld", iInsertId);
 		phpObjectWomanInfo["admireId"]		= EncryptWin(temp);
@@ -2664,7 +2668,7 @@ bool DBManager::UpdateEmailSystem(
 					"WHERE id = %s "
 					";",
 					number + 1,
-					admireInfo.c_str(),
+					SqlTransferInsert(admireInfo).c_str(),
 					id.c_str()
 			);
 
@@ -2719,13 +2723,13 @@ bool DBManager::UpdateEmailSystem(
 					"status = 'N' "
 					";",
 					man.manId.c_str(),
-					SqlTransfer(man.manName).c_str(),
-					SqlTransfer(man.lastName).c_str(),
-					SqlTransfer(man.email).c_str(),
+					SqlTransferInsert(man.manName).c_str(),
+					SqlTransferInsert(man.lastName).c_str(),
+					SqlTransferInsert(man.email).c_str(),
 					man.sid.c_str(),
 					senthour,
 					lady.mSiteId,
-					admireInfo.c_str()
+					SqlTransferInsert(admireInfo).c_str()
 			);
 
 			LogManager::GetLogManager()->Log(
@@ -2791,13 +2795,11 @@ int DBManager::GetIndexBySiteId(int siteId) {
 	return index;
 }
 
-string DBManager::SqlTransfer(const string& sql) {
+string DBManager::SqlTransferInsert(const string& sql) {
 	string result = "";
 
 	result = StringHandle::replace(sql, "\\", "\\\\");
 	result = StringHandle::replace(result, "'", "\\'");
-	result = StringHandle::replace(result, "%", "\\%");
-	result = StringHandle::replace(result, "_", "\\_");
 
 	return result;
 }
@@ -2906,7 +2908,7 @@ string DBManager::GetLadyConditionString(const Lady& lady) {
 			value += "AND ";
 		}
 		value += "firstname like '%";
-		value += SqlTransfer(lady.mManName);
+		value += SqlTransferInsert(lady.mManName);
 		value += "%' ";
 	}
 
@@ -3962,6 +3964,8 @@ void DBManager::SyncManFromDatabase() {
 			bEnougth?"true":"false",
 			iHandleTime
 			);
+
+	GetManCanRecvIdString();
 }
 
 bool DBManager::SyncManFromDatabaseLoginRecent() {
@@ -3969,7 +3973,7 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 			LOG_WARNING,
 			"DBManager::SyncManFromDatabaseLoginRecent( "
 			"tid : %d, "
-			"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表] "
+			"[增量同步男士(最近30天有登录, 最后登录时间倒序)] "
 			")",
 			(int)syscall(SYS_gettid)
 			);
@@ -4021,7 +4025,7 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 			sql3 += (*iter).mPostfix;
 			sql3 += "`=1";
 		}
-		sql3 += "WHERE `manid`=?";
+		sql3 += " WHERE `manid`=?";
 
 		// 最近30天有登录过, 最后登录时间倒序
 		snprintf(sql, MAXSQLSIZE - 1,
@@ -4040,11 +4044,24 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 				LOG_WARNING,
 				"DBManager::SyncManFromDatabaseLoginRecent( "
 				"tid : %d, "
-				"[从数据库获取男士, 最近30天有登录过, 最后登录时间倒序], "
+				"[增量同步男士(最近30天有登录, 最后登录时间倒序), 同步分站], "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				sql
+				);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::SyncManFromDatabaseLoginRecent( "
+				"tid : %d, "
+				"[增量同步男士(最近30天有登录, 最后登录时间倒序), 同步分站], "
+				"sql2 : %s, "
+				"sql3 : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql2.c_str(),
+				sql3.c_str()
 				);
 
 		unsigned int iHandleSiteTime = GetTickCount();
@@ -4058,12 +4075,11 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 					LOG_STAT,
 					"DBManager::SyncManFromDatabaseLoginRecent( "
 					"tid : %d, "
-					"iRow : %d, "
-					"iFields : %d "
+					"[增量同步男士(最近30天有登录, 最后登录时间倒序), 同步分站], "
+					"iRow : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRow,
-					iFields
+					iRow
 					);
 
 			// 移动下标
@@ -4107,30 +4123,8 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 						UpdateManFromDataBase(stmtUpdateMan, man);
 					}
 
-					// 从数据库同步男士基本信息失败
-					if( !bInsert ) {
-//						string value = "[";
-//						for( int k = 0; k < iFields; k++ ) {
-//							value += row[k];
-//							value += ", ";
-//						}
-//						if( value.length() > 1 ) {
-//							value = value.substr(0, value.length() - 2);
-//						}
-//						value += "]";
-//						LogManager::GetLogManager()->Log(
-//								LOG_STAT,
-//								"DBManager::SyncManFromDatabaseLoginRecent( "
-//								"tid : %d, "
-//								"[从数据库获取男士, 失败], "
-//								"row : %d, "
-//								"value : %s "
-//								")",
-//								(int)syscall(SYS_gettid),
-//								i,
-//								value.c_str()
-//								);
-					} else {
+					// 从数据库同步男士基本信息成功
+					if( bInsert ) {
 						iSync++;
 					}
 				}
@@ -4153,7 +4147,7 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 					LOG_WARNING,
 					"DBManager::SyncManFromDatabaseLoginRecent( "
 					"tid : %d, "
-					"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表, 失败], "
+					"[增量同步男士(最近30天有登录, 最后登录时间倒序), 同步分站, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -4168,11 +4162,14 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 				LOG_MSG,
 				"DBManager::SyncManFromDatabaseLoginRecent( "
 				"tid : %d, "
+				"[增量同步男士(最近30天有登录, 最后登录时间倒序), 同步分站, 完成], "
 				"iHandleSiteTime : %u ms, "
+				"iRow : %d, "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				iHandleSiteTime,
+				iRow,
 				sql
 				);
 
@@ -4184,7 +4181,7 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 				LOG_WARNING,
 				"DBManager::SyncManFromDatabaseLoginRecent( "
 				"tid : %d, "
-				"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表, 没有更多数据] "
+				"[增量同步男士(最近30天有登录, 最后登录时间倒序), 没有更多数据] "
 				")",
 				(int)syscall(SYS_gettid)
 				);
@@ -4196,15 +4193,13 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 			LOG_WARNING,
 			"DBManager::SyncManFromDatabaseLoginRecent( "
 			"tid : %d, "
-			"[增量同步男士(最近30天有登录, 最后登录时间倒序)到内存表, 完成], "
+			"[增量同步男士(最近30天有登录, 最后登录时间倒序), 完成], "
 			"iHandleTime : %u ms, "
-			"iTotalSync : %d, "
-			"sql : %s "
+			"iTotalSync : %d "
 			")",
 			(int)syscall(SYS_gettid),
 			iHandleTime,
-			iTotalSync,
-			sql
+			iTotalSync
 			);
 
 	return bFlag;
@@ -4215,7 +4210,7 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 			LOG_WARNING,
 			"DBManager::SyncManFromDatabaseRegRecent( "
 			"tid : %d, "
-			"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表] "
+			"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)] "
 			")",
 			(int)syscall(SYS_gettid)
 			);
@@ -4267,7 +4262,7 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 			sql3 += (*iter).mPostfix;
 			sql3 += "`=1";
 		}
-		sql3 += "WHERE `manid`=?";
+		sql3 += " WHERE `manid`=?";
 
 		snprintf(sql, MAXSQLSIZE - 1,
 				"SELECT manid, last_login "
@@ -4285,11 +4280,24 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 				LOG_WARNING,
 				"DBManager::SyncManFromDatabaseRegRecent( "
 				"tid : %d, "
-				"[从数据库获取男士, 1个月内有登录过, 最后登录时间倒序], "
+				"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序), 同步分站], "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				sql
+				);
+
+		LogManager::GetLogManager()->Log(
+				LOG_STAT,
+				"DBManager::SyncManFromDatabaseLoginRecent( "
+				"tid : %d, "
+				"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序), 同步分站], "
+				"sql2 : %s, "
+				"sql3 : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql2.c_str(),
+				sql3.c_str()
 				);
 
 		unsigned int iHandleSiteTime = GetTickCount();
@@ -4303,12 +4311,11 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 					LOG_STAT,
 					"DBManager::SyncManFromDatabaseRegRecent( "
 					"tid : %d, "
-					"iRow : %d, "
-					"iFields : %d "
+					"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序), 同步分站], "
+					"iRow : %d "
 					")",
 					(int)syscall(SYS_gettid),
-					iRow,
-					iFields
+					iRow
 					);
 
 			// 移动下标
@@ -4355,31 +4362,8 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 						}
 					}
 
-					// 从数据库同步男士基本信息失败
-					if( !bInsert ) {
-//						string value = "[";
-//						for( int k = 0; k < iFields; k++ ) {
-//							value += row[k];
-//							value += ", ";
-//						}
-//						if( value.length() > 1 ) {
-//							value = value.substr(0, value.length() - 2);
-//						}
-//						value += "]";
-//						LogManager::GetLogManager()->Log(
-//								LOG_STAT,
-//								"DBManager::SyncManFromDatabaseRegRecent( "
-//								"tid : %d, "
-//								"[从数据库获取男士] "
-//								"失败, "
-//								"row : %d, "
-//								"value : %s "
-//								")",
-//								(int)syscall(SYS_gettid),
-//								i,
-//								value.c_str()
-//								);
-					} else {
+					// 从数据库同步男士基本信息成功
+					if( bInsert ) {
 						iSync++;
 					}
 				}
@@ -4402,7 +4386,7 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 					LOG_WARNING,
 					"DBManager::SyncManFromDatabaseRegRecent( "
 					"tid : %d, "
-					"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表, 失败], "
+					"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序), 同步分站, 失败], "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -4417,11 +4401,14 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 				LOG_MSG,
 				"DBManager::SyncManFromDatabaseRegRecent( "
 				"tid : %d, "
+				"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序), 同步分站, 完成], "
 				"iHandleSiteTime : %u ms, "
+				"iRow : %d, "
 				"sql : %s "
 				")",
 				(int)syscall(SYS_gettid),
 				iHandleSiteTime,
+				iRow,
 				sql
 				);
 
@@ -4433,7 +4420,7 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 				LOG_WARNING,
 				"DBManager::SyncManFromDatabaseRegRecent( "
 				"tid : %d, "
-				"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表, 没有更多数据] "
+				"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序), 没有更多数据] "
 				")",
 				(int)syscall(SYS_gettid)
 				);
@@ -4445,7 +4432,7 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 			LOG_WARNING,
 			"DBManager::SyncManFromDatabaseRegRecent( "
 			"tid : %d, "
-			"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序)到内存表, 完成], "
+			"[增量同步男士(非最近30天有登录, 最近注册, 最后登录时间倒序), 完成], "
 			"iHandleTime : %u ms, "
 			"iTotalSync : %d, "
 			"sql : %s "
@@ -5074,9 +5061,11 @@ bool DBManager::UpdateManCanRecv(
 			"DBManager::UpdateManCanRecv( "
 			"tid : %d, "
 			"[在内存表更新男士能否收信], "
+			"manid : %s, "
 			"bCanRecv : %s "
 			")",
 			(int)syscall(SYS_gettid),
+			man.manId.c_str(),
 			bCanRecv?"true":"false"
 			);
 
@@ -5108,14 +5097,16 @@ bool DBManager::UpdateManCanRecv(
 	}
 
 	LogManager::GetLogManager()->Log(
-			LOG_STAT,
+			LOG_MSG,
 			"DBManager::UpdateManCanRecv( "
 			"tid : %d, "
-			"bFlag : %s, "
-			"end "
+			"[在内存表更新男士能否收信], "
+			"manid : %s, "
+			"sql : %s "
 			")",
 			(int)syscall(SYS_gettid),
-			bFlag?"true":"false"
+			man.manId.c_str(),
+			sql
 			);
 
 	return bFlag;
@@ -5226,7 +5217,6 @@ bool DBManager::UpdateManRecv(const Man& man, const DBRECVSTRUCT& dbStruct)
 					"DBManager::UpdateManRecv( "
 					"tid : %d, "
 					"[在内存表更新男士收信数量, 失败], "
-					"[标记男士为不能发送意向信],  "
 					"sql : %s "
 					")",
 					(int)syscall(SYS_gettid),
@@ -5242,9 +5232,11 @@ bool DBManager::UpdateManRecv(const Man& man, const DBRECVSTRUCT& dbStruct)
 			"DBManager::UpdateManRecv( "
 			"tid : %d, "
 			"[在内存表更新男士收信数量], "
+			"manId : %s, "
 			"bFlag : %s "
 			")",
 			(int)syscall(SYS_gettid),
+			man.manId.c_str(),
 			bFlag?"true":"false"
 			);
 
@@ -5273,7 +5265,7 @@ bool DBManager::UpdateLadyCanSend(const string& womanId, bool bCanSend) {
 			"DBManager::UpdateLadyCanSend( "
 			"tid : %d, "
 			"[在内存表更新女士能否收信], "
-			"womanid : %s, "
+			"womanId : %s, "
 			"bCanSend : %s "
 			")",
 			(int)syscall(SYS_gettid),
@@ -5292,6 +5284,80 @@ bool DBManager::UpdateLadyCanSend(const string& womanId, bool bCanSend) {
 	sqlite3_finalize(stmtLady);
 
 	return bFlag;
+}
+
+string DBManager::GetManCanRecvIdString() {
+	string resultString;
+
+	Json::Value root;
+
+	char sql[MAXSQLSIZE] = {'\0'};
+	for(int i = 0; i < miDbCount; i++) {
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT manid "
+				"FROM man "
+				"WHERE can_sent_%s = 1 "
+				";",
+				mpDbLady[i].mDefPostfix.c_str()
+		);
+
+		bool bResult = false;
+		char** result = NULL;
+		int iRow = 0;
+		int iColumn = 0;
+
+		Json::Value userList;
+		bResult = QuerySQL(mdb, sql, &result, &iRow, &iColumn, NULL);
+		if( bResult && result ) {
+			if( iRow > 0 ) {
+				for(int j = 1; j < iRow + 1; j++) {
+					userList.append(result[j]);
+				}
+			}
+		}
+		root[mpDbLady[i].mDefPostfix] = userList;
+	}
+
+	Json::FastWriter writer;
+	resultString = writer.write(root);
+
+	LogManager::GetLogManager()->Log(
+			LOG_WARNING,
+			"DBManager::GetManCanRecvIdString( "
+			"tid : %d, "
+			"[获取内存表允许收信男士Id字符串] ############### Start ##############"
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	int resultStringSize = resultString.length();
+	int resultStringIndex = 0;
+	int logStringSize = 0;
+	do {
+		logStringSize = MIN(resultStringSize, MAX_LOG_BUFFER_LEN - 10);
+		string logString = resultString.substr(resultStringIndex, logStringSize);
+
+		LogManager::GetLogManager()->Log(
+				LOG_WARNING,
+				"%s",
+				logString.c_str()
+				);
+
+		resultStringIndex += logStringSize;
+		resultStringSize -= logStringSize;
+	}
+	while( logStringSize >= MAX_LOG_BUFFER_LEN - 10 );
+
+	LogManager::GetLogManager()->Log(
+			LOG_WARNING,
+			"DBManager::GetManCanRecvIdString( "
+			"tid : %d, "
+			"[获取内存表允许收信男士Id字符串] ############### End ##############"
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	return resultString;
 }
 
 int DBManager::GetManCanRecvCount() {
@@ -5336,6 +5402,55 @@ int DBManager::GetManCanRecvCount() {
 			);
 
 	return iCount;
+}
+
+string DBManager::GetManCanRecvCountString() {
+	string resultString;
+
+	char sql[MAXSQLSIZE] = {'\0'};
+	for(int i = 0; i < miDbCount; i++) {
+		snprintf(sql, MAXSQLSIZE - 1,
+				"SELECT count(manid) "
+				"FROM man "
+				"WHERE can_sent_%s = 1 "
+				";",
+				mpDbLady[i].mDefPostfix.c_str()
+		);
+
+		bool bResult = false;
+		char** result = NULL;
+		int iRow = 0;
+		int iColumn = 0;
+
+		bResult = QuerySQL(mdb, sql, &result, &iRow, &iColumn, NULL);
+		if( bResult && result ) {
+			if( iRow > 0 ) {
+				if( result[1] != NULL ) {
+					resultString += mpDbLady[i].mDefPostfix;
+					resultString += ":";
+					resultString += result[1];
+					resultString += ",";
+				}
+			}
+		}
+	}
+
+	if( resultString.length() > 0 ) {
+		resultString = resultString.substr(0, resultString.length() -1);
+	}
+
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::GetManCanRecvCountString( "
+			"tid : %d, "
+			"[在内存表获取允许收信男士数量字符串], "
+			"resultString : %s "
+			")",
+			(int)syscall(SYS_gettid),
+			resultString.c_str()
+			);
+
+	return resultString;
 }
 
 bool DBManager::UpdateLadySent(const Lady& lady) {

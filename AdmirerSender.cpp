@@ -1149,15 +1149,6 @@ void AdmirerSender::RemoveLadyFromAgent(const string& agentId) {
 
 void AdmirerSender::StateRunnableHandle() {
 	unsigned int iCount = 0;
-
-	unsigned int iTotal = 0;
-	double iSecondTotal = 0;
-
-	unsigned int iHit = 0;
-	double iSecondHit = 0;
-
-	double iResponed = 0;
-
 	unsigned int iStateTime = miStateTime;
 
 	while( IsRunning() ) {
@@ -1165,77 +1156,17 @@ void AdmirerSender::StateRunnableHandle() {
 			iCount++;
 		} else {
 			iCount = 0;
-			iSecondTotal = 0;
-			iSecondHit = 0;
-			iResponed = 0;
 
-			mCountMutex.lock();
-			iTotal = mTotal;
-			iHit = mHit;
-
-			if( iStateTime != 0 ) {
-				iSecondTotal = 1.0 * iTotal / iStateTime;
-				iSecondHit = 1.0 * iHit / iStateTime;
-			}
-			if( iTotal != 0 ) {
-				iResponed = 1.0 * mResponed / iTotal;
-			}
-
-			mHit = 0;
-			mTotal = 0;
-			mResponed = 0;
-			mCountMutex.unlock();
-
-//			LogManager::GetLogManager()->Log(LOG_WARNING,
-//					"AdmirerSender::StateRunnable( tid : %d, TcpServer::GetHandleMessageList() : %d )",
-//					(int)syscall(SYS_gettid),
-//					(MessageList*) mClientTcpServer.GetHandleMessageList()->Size()
-//					);
 			LogManager::GetLogManager()->Log(LOG_WARNING,
 					"AdmirerSender::StateRunnable( "
 					"tid : %d, "
 					"[内存待发送信件女士数量] : %d, "
-					"[内存允许收信男士数量] : %d "
+					"[内存允许收信男士数量] : {%s} "
 					")",
 					(int)syscall(SYS_gettid),
 					mLadyLetterSendListMap.Size(),
-					mDBManager.GetManCanRecvCount()
+					mDBManager.GetManCanRecvCountString().c_str()
 					);
-//			LogManager::GetLogManager()->Log(LOG_WARNING,
-//					"AdmirerSender::StateRunnable( "
-//					"tid : %d, "
-//					"iTotal : %u, "
-//					"iHit : %u, "
-//					"iSecondTotal : %.1lf, "
-//					"iSecondHit : %.1lf, "
-//					"iResponed : %.1lf, "
-//					"iStateTime : %u "
-//					")",
-//					(int)syscall(SYS_gettid),
-//					iTotal,
-//					iHit,
-//					iSecondTotal,
-//					iSecondHit,
-//					iResponed,
-//					iStateTime
-//					);
-//			LogManager::GetLogManager()->Log(LOG_WARNING,
-//					"AdmirerSender::StateRunnable( "
-//					"tid : %d, "
-//					"过去%u秒共收到%u个请求, "
-//					"成功处理%u个请求, "
-//					"平均收到%.1lf个/秒, "
-//					"平均处理%.1lf个/秒, "
-//					"平均响应时间%.1lf毫秒/个"
-//					")",
-//					(int)syscall(SYS_gettid),
-//					iStateTime,
-//					iTotal,
-//					iHit,
-//					iSecondTotal,
-//					iSecondHit,
-//					iResponed
-//					);
 
 			iStateTime = miStateTime;
 		}
