@@ -779,7 +779,11 @@ int AdmirerSender::HandleRecvMessage(Message *m, Message *sm) {
 				if( pClearTime != NULL ) {
 					iClearTime = atoll(pClearTime);
 				}
+				// 标记所有信件为已经处理
 				ClearLetterSendList(iClearTime);
+				// 清空男士内存表
+				mDBManager.CleanManTable();
+				mDBManager.SyncForce();
 
 				// 回复
 				rootSend["ret"] = 1;

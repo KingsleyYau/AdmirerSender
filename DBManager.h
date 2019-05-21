@@ -150,6 +150,11 @@ public:
 	bool SetAllLetterDelete(long long timestamp = 0);
 
 	/**
+	 * 清空男士内存表
+	 */
+	bool CleanManTable();
+
+	/**
 	 * 同步处理
 	 * @description 		数据库->内存表
 	 */

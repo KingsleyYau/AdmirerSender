@@ -22,7 +22,7 @@ public:
 
 	}
 
-	AdmireTemplate(const AdmireTemplate& item){
+	AdmireTemplate(const AdmireTemplate& item) {
 		templateCode = item.templateCode;
 		at_greet = item.at_greet;
 		at_content_en = item.at_content_en;

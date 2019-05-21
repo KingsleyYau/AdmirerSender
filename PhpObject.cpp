@@ -217,7 +217,7 @@ bool PhpObject::UnSerialize(string serializeString) {
 
 			if( !bFlag ) {
 				// parse error
-				ConsoleLog("# Parse '}' : ObjectTypeUnknow \n");
+				ConsoleLog("# Parse '}', ObjectTypeUnknow \n");
 				break;
 
 			} else {
@@ -233,75 +233,97 @@ bool PhpObject::UnSerialize(string serializeString) {
 
 			}
 
-			string paramString = serializeString.substr(sep + 1, index - (sep + 1));
-			ConsoleLog("# Parse ';' paramString : %s \n", paramString.c_str());
-			vector<string> param = StringHandle::splitWithVector(paramString, ":");
-			ConsoleLog("# Parse ';' param.size() : %d, param[0] : %s \n", param.size(), param[0].c_str());
-			if( param.size() > 2 ) {
-				if( param[0] == "s" && param.size() >= 3 ) {
-					ConsoleLog("# Parse ';' 's' \n");
-					if( pParrentObj != NULL ) {
-						// parent node type
-						switch( pParrentObj->mObjectType ) {
-						case ObjectTypeArray: {
-							// array (value1, value2...)
-							value = StringHandle::replace(param[2], "\"", "");
-							(*pParrentObj).Append(value);
-							ConsoleLog("# Parse ';', ObjectTypeArray, value : %s \n", value.c_str());
+			// Separate object string
+			string objectString = serializeString.substr(sep + 1, index - (sep + 1));
+			ConsoleLog("# Parse ';', objectString : %s \n", objectString.c_str());
 
-						}break;
-						case ObjectTypeMap: {
-							// map (key => value)
-//							printf("# map (key => value) \n");
-							if( key.length() == 0 ) {
-								key = StringHandle::replace(param[2], "\"", "");
-								ConsoleLog("# Parse ';', ObjectTypeMap, key : %s \n", key.c_str());
+			string objectType = "";
+			string objectLength = "";
+			string objectName = "";
+
+			// Find objectType(ex:s)
+			string::size_type objectTypeIndex = objectString.find(":");
+			if( objectTypeIndex != string::npos) {
+				objectType = objectString.substr(0, objectTypeIndex);
+
+				// Find objectLength(ex:9)
+				string::size_type objectLengthIndex = objectString.find(":", objectTypeIndex + 1);
+				if( objectLengthIndex != string::npos) {
+					objectLength = objectString.substr(objectTypeIndex + 1, objectLengthIndex - (objectTypeIndex + 1));
+
+					if( objectString.length() > (objectLengthIndex + 1) ) {
+						// Find objectName(ex:womanId)
+						objectName = objectString.substr(objectLengthIndex + 1, objectString.length() - (objectLengthIndex + 1));
+					}
+				} else {
+					if( objectString.length() > (objectTypeIndex + 1) ) {
+						// Find objectLength(ex:9)
+						objectLength = objectString.substr(objectTypeIndex + 1, objectString.length() - (objectTypeIndex + 1));
+					}
+				}
+			}
+
+			if( (strcmp(objectType.c_str(), "s") == 0) && objectLength.length() > 0 && objectName.length() > 0 ) {
+				if( pParrentObj != NULL ) {
+					// Parent node type
+					switch( pParrentObj->mObjectType ) {
+					case ObjectTypeArray: {
+						// array (value1, value2...)
+						value = StringHandle::replace(objectName, "\"", "");
+						(*pParrentObj).Append(value);
+						ConsoleLog("# Parse ';', ObjectTypeArray, value : %s \n", value.c_str());
+
+					}break;
+					case ObjectTypeMap: {
+						// map (key => value)
+						if( key.length() == 0 ) {
+							key = StringHandle::replace(objectName, "\"", "");
+							ConsoleLog("# Parse ';', ObjectTypeMap, key : %s \n", key.c_str());
+
+						} else {
+							value = StringHandle::replace(objectName, "\"", "");
+							ConsoleLog("# Parse ';', ObjectTypeMap, value : %s \n", value.c_str());
+
+							if( key.length() > 0 ) {
+								(*pParrentObj)[key] = value;
 
 							} else {
-								value = StringHandle::replace(param[2], "\"", "");
-								ConsoleLog("# Parse ';', ObjectTypeMap, value : %s \n", value.c_str());
+								// parse error
+								ConsoleLog("# Parse ';', ObjectTypeMap, key error \n");
+								bFlag = false;
 
-								if( key.length() > 0 ) {
-									(*pParrentObj)[key] = value;
-									key = "";
-
-								} else {
-									// parse error
-									ConsoleLog("# Parse ';' : ObjectTypeMap, key error \n");
-									bFlag = false;
-
-								}
-								ConsoleLog("# Parse ';' : ObjectTypeMap, key : %s, value : %s \n", key.c_str(), value.c_str());
 							}
-
-						}break;
-						default: {
-							// parse error
-							ConsoleLog("# Parse ';' : ObjectTypeUnknow \n");
-							bFlag = false;
-
-						}break;
+							ConsoleLog("# Parse ';', ObjectTypeMap, key : %s, value : %s \n", key.c_str(), value.c_str());
+							key = "";
 						}
 
-					} else {
-						// current node
-						ConsoleLog("# Parse ';' : Current node \n");
-						value = StringHandle::replace(param[2], "\"", "");
-						(*pCurObj) = value;
+					}break;
+					default: {
+						// Parse error
+						ConsoleLog("# Parse ';', ObjectTypeUnknow \n");
+						bFlag = false;
 
+					}break;
 					}
 
-				} else if( param[0] == "i" ) {
-					// array object index, continue
-					ConsoleLog("# Parse ';' param[0] : i, continue \n");
-
 				} else {
-					// parse error
-					ConsoleLog("# Parse ';' param[0] : unknow, error \n");
+					// Current node
+					ConsoleLog("# Parse ';' : Current node \n");
+					value = StringHandle::replace(objectName, "\"", "");
+					(*pCurObj) = value;
 
-					bFlag = false;
-					break;
 				}
+
+			} else if( (strcmp(objectType.c_str(), "i") == 0) ) {
+				// Array object index, continue
+				ConsoleLog("# Parse ';', ObjectTypeArray, index : %s, continue \n", objectLength.c_str());
+
+			} else {
+				// Parse error
+				ConsoleLog("# Parse ';', objectType : %s, objectLength : %s, objectName : %s, unknow error \n", objectType.c_str(), objectLength.c_str(), objectName.c_str());
+
+				bFlag = false;
+				break;
 			}
 
 			if( !bFlag ) {

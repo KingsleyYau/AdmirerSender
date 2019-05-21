@@ -25,11 +25,12 @@ public:
 		sid = "";
 		lastName = "";
 		email = "";
+		subSiteId = "";
 	}
 
 	virtual ~Man(){};
 
-	Man(const Man& item){
+	Man(const Man& item) {
 		id = item.id;
 		manId = item.manId;
 		manName = item.manName;
@@ -40,6 +41,7 @@ public:
 		sid = item.sid;
 		lastName = item.lastName;
 		email = item.email;
+		subSiteId = item.subSiteId;
 	}
 
 	Man& operator=(const Man& item) {
@@ -53,6 +55,7 @@ public:
 		sid = item.sid;
 		lastName = item.lastName;
 		email = item.email;
+		subSiteId = item.subSiteId;
 		return *this;
 	}
 
@@ -66,7 +69,7 @@ public:
 	string sid;
 	string lastName;
 	string email;
-
+	string subSiteId;
 };
 
 #endif /* MAN_H_ */

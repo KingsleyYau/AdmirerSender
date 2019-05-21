@@ -52,7 +52,7 @@ public:
 
 	virtual ~Lady(){};
 
-	Lady(const Lady& item){
+	Lady(const Lady& item) {
 		id = item.id;
 		mRecordId = item.mRecordId;
 		mSiteId = item.mSiteId;

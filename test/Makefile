@@ -16,14 +16,16 @@ CXXFLAGS = -O2 -g
 endif
 
 CXXFLAGS +=	-Wall -fmessage-length=0 -Wunused-variable -Wno-write-strings -Wno-narrowing -Wno-unused-variable
-CXXFLAGS +=	-I. -I../ -I../libev
+CXXFLAGS +=	-I. -I../ -I../libev -I../json 
 
 LIBS =		-L. \
 			-Wl,-Bdynamic -ldl -lz -lpthread 
 
 COMMON  	=
-				
+JSONOBJS 	= ../json/json_reader.o ../json/json_value.o ../json/json_writer.o
+		
 OBJS	+= $(COMMON)
+OBJS	+= $(JSONOBJS)
 OBJS	+= php_tester.o ../PhpObject.o
 
 TARGET =	php-tester

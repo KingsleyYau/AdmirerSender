@@ -7,6 +7,8 @@
 
 #include "DBManager.h"
 
+#include "json/json/json.h"
+
 #define MAXSQLSIZE 1024
 #define MAXBIGSQLSIZE 100 * 1024
 #define MAXMANCOUNT 100 * 1000
@@ -993,7 +995,7 @@ bool DBManager::GetTemplateInfo(Lady& lady, AdmireTemplate& admireTemplate) {
 	MYSQL_RES* pSQLRes = NULL;
 	short shIdt = 0;
 	int iRow = 0;
-	char sql[MAXSQLSIZE] = {'\0'};
+	char sql[MAXBIGSQLSIZE] = {'\0'};
 
 	int iIndex = GetIndexBySiteId(lady.mSiteId);
 	if( iIndex != INVALID_INDEX ) {
@@ -1326,7 +1328,7 @@ bool DBManager::SendLetter(
 				);
 
 		snprintf(sql, MAXSQLSIZE - 1,
-				"SELECT manid, manname, paid_amount, login_time, admirerNotify, sid, lastName, email, mid, sent_%s "
+				"SELECT manid, manname, paid_amount, login_time, admirerNotify, sid, lastName, email, mid, subSiteId, sent_%s "
 				"FROM man "
 				"WHERE can_sent_%s = 1 "
 				"ORDER BY sent_%s  "
@@ -1373,6 +1375,7 @@ bool DBManager::SendLetter(
 						"lastName : %s, "
 						"email : %s, "
 						"id : %s, "
+						"subSiteId : %s, "
 						"sent : %s "
 						")",
 						(int)syscall(SYS_gettid),
@@ -1385,35 +1388,73 @@ bool DBManager::SendLetter(
 						result[i * iColumn + 6],
 						result[i * iColumn + 7],
 						result[i * iColumn + 8],
-						result[i * iColumn + 9]
+						result[i * iColumn + 9],
+						result[i * iColumn + 10]
 						);
 
 				Man man;
-				man.manId = result[i * iColumn];
-				man.manName = result[i * iColumn + 1];
-
+				if( result[i * iColumn] != NULL ) {
+					man.manId = result[i * iColumn];
+				}
+				if( result[i * iColumn + 1] != NULL ) {
+					man.manName = result[i * iColumn + 1];
+				}
 				if( result[i * iColumn + 2] != NULL ) {
 					man.paidAmount = atof(result[i * iColumn + 2]);
 				}
-
-				man.login_time = (result[i * iColumn + 3]);
-
+				if( result[i * iColumn + 3] != NULL ) {
+					man.login_time = (result[i * iColumn + 3]);
+				}
 				if( result[i * iColumn + 4] != NULL ) {
 					man.admirerNotify = atoi(result[i * iColumn + 4]);
 				}
-
-				man.sid = result[i * iColumn + 5];
-				man.lastName = result[i * iColumn + 6];
-				man.email = result[i * iColumn + 7];
-
+				if( result[i * iColumn + 5] != NULL ) {
+					man.sid = result[i * iColumn + 5];
+				}
+				if( result[i * iColumn + 6] != NULL ) {
+					man.lastName = result[i * iColumn + 6];
+				}
+				if( result[i * iColumn + 7] != NULL ) {
+					man.email = result[i * iColumn + 7];
+				}
 				if( result[i * iColumn + 8] != NULL ) {
 					man.id = atoi(result[i * iColumn + 8]);
+				}
+				if( result[i * iColumn + 9] != NULL ) {
+					man.subSiteId = result[i * iColumn + 9];
 				}
 
 				/**
 				 * 检查男士是否允许接收
 				 */
 				if( CanRecvLetter(lady, man) ) {
+					LogManager::GetLogManager()->Log(
+							LOG_STAT,
+							"DBManager::SendLetter( "
+							"tid : %d, "
+							"manid : %s, "
+							"manName : %s, "
+							"paidAmount : %f, "
+							"login_time : %s, "
+							"admirerNotify : %d, "
+							"sid : %s, "
+							"lastName : %s, "
+							"email : %s, "
+							"id : %lld, "
+							"subSiteId : %s "
+							")",
+							(int)syscall(SYS_gettid),
+							man.manId.c_str(),
+							man.manName.c_str(),
+							man.paidAmount,
+							man.login_time.c_str(),
+							man.admirerNotify,
+							man.sid.c_str(),
+							man.lastName.c_str(),
+							man.email.c_str(),
+							man.id,
+							man.subSiteId.c_str()
+							);
 					bFlag = SendLetter2Man(lady, regulation, admireTemplate, man);
 //					bSend = true;
 					break;
@@ -1640,6 +1681,7 @@ bool DBManager::SendLetter2Man(
 
 	const string manId = man.manId;
 	const string manName = man.manName;
+	const string subSiteId = man.subSiteId;
 
 	LogManager::GetLogManager()->Log(
 			LOG_MSG,
@@ -1650,14 +1692,16 @@ bool DBManager::SendLetter2Man(
 			"womanId : %s, "
 			"templateCode : %s, "
 			"manId : %s, "
-			"manName : %s "
+			"manName : %s, "
+			"subSiteId : %s "
 			")",
 			(int)syscall(SYS_gettid),
 			recordId,
 			womanId.c_str(),
 			admireTemplate.templateCode.c_str(),
 			manId.c_str(),
-			man.manName.c_str()
+			manName.c_str(),
+			subSiteId.c_str()
 			);
 
 	unsigned int iHandleTime = GetTickCount();
@@ -2355,7 +2399,7 @@ bool DBManager::UpdateMsgProcessList(const Man& man, const Lady& lady) {
 
 	RESDataList res;
 	int iRow = 0;
-	char sql[MAXSQLSIZE] = {'\0'};
+	char sql[MAXBIGSQLSIZE] = {'\0'};
 
 	DBRECVSTRUCT dbStruct;
 	int iIndex = GetIndexBySiteId(lady.mSiteId);
@@ -2404,7 +2448,7 @@ bool DBManager::UpdateMsgProcessList(const Man& man, const Lady& lady) {
 		}
 	}
 
-	iHandleTime =  GetTickCount() - iHandleTime;
+	iHandleTime = GetTickCount() - iHandleTime;
 
 	LogManager::GetLogManager()->Log(
 			LOG_STAT,
@@ -2466,43 +2510,35 @@ bool DBManager::UpdateEmailSystem(
 	string info = "";
 	string admireInfo = "";
 
-	PhpObject phpObjectWomanInfo;
+	Json::Value infoNew;
+	Json::Value infoOrignal;
 
 	if( iInsertId != 0 ) {
 		// 根据女士信息生成数据
-		phpObjectWomanInfo["birthday"] 		= lady.birthday;
-		phpObjectWomanInfo["firstname"] 	= lady.mWomanName;
-		phpObjectWomanInfo["lastname"]  	= lady.lastname;
-		phpObjectWomanInfo["country"]   	= lady.country;
-		phpObjectWomanInfo["owner"]     	= lady.mAgentId;
-		phpObjectWomanInfo["id"]        	= lady.id;
-		phpObjectWomanInfo["womanid"]   	= lady.mWomanId;
-		phpObjectWomanInfo["height"]   		= lady.height;
-		phpObjectWomanInfo["weight"]   		= lady.weight;
-		phpObjectWomanInfo["marry"]     	= lady.marry;
-		phpObjectWomanInfo["admireInfo"]	= admireBody.substr(0, 200);
 		char temp[64];
 		sprintf(temp, "%lld", iInsertId);
-		phpObjectWomanInfo["admireId"]		= EncryptWin(temp);
-		phpObjectWomanInfo["province"]  	= lady.province;
-
-		/**
-		 * Add by Max 2016/07/11
-		 * 增加发送时间和模版类型
-		 */
-		phpObjectWomanInfo["template_type"]  	= admireTemplate.templateType;
 
 		time_t stm = time(NULL);
 		struct tm tTime;
 		localtime_r(&stm, &tTime);
-		char sendTmie[128] = {'\0'};
-		snprintf(sendTmie, 64, "%d-%02d-%02d %02d:%02d:%02d", tTime.tm_year+1900, tTime.tm_mon+1, tTime.tm_mday, tTime.tm_hour, tTime.tm_min, tTime.tm_sec);
-		/**
-		 * Modify by Max 2017/11/22
-		 * 修改sendtime为send_time
-		 */
-		phpObjectWomanInfo["send_time"]  	= sendTmie;
-		/* Add end */
+		char sendTime[128] = {'\0'};
+		snprintf(sendTime, 64, "%d-%02d-%02d %02d:%02d:%02d", tTime.tm_year+1900, tTime.tm_mon+1, tTime.tm_mday, tTime.tm_hour, tTime.tm_min, tTime.tm_sec);
+
+		infoNew["birthday"] 		= lady.birthday;
+		infoNew["firstname"] 		= lady.mWomanName;
+		infoNew["lastname"]  		= lady.lastname;
+		infoNew["country"]   		= lady.country;
+		infoNew["owner"]     		= lady.mAgentId;
+		infoNew["id"]        		= lady.id;
+		infoNew["womanid"]   		= lady.mWomanId;
+		infoNew["height"]   		= lady.height;
+		infoNew["weight"]   		= lady.weight;
+		infoNew["marry"]     		= lady.marry;
+		infoNew["admireInfo"]		= admireBody.substr(0, 200);
+		infoNew["admireId"]			= EncryptWin(temp);
+		infoNew["province"]  		= lady.province;
+		infoNew["template_type"]  	= admireTemplate.templateType;
+		infoNew["send_time"]  		= sendTime;
 
 		bFlag = true;
 	}
@@ -2512,7 +2548,7 @@ bool DBManager::UpdateEmailSystem(
 
 		snprintf(sql, MAXBIGSQLSIZE - 1,
 				"SELECT id, number, info "
-				"FROM msg_process_list "
+				"FROM msg_process_list_json "
 				"WHERE manid = '%s' "
 				"AND womansiteid = %d "
 				"AND type = 2 "
@@ -2583,8 +2619,6 @@ bool DBManager::UpdateEmailSystem(
 				);
 
 		if( bFlag ) {
-			PhpObject phpObjectAdmireInfo;
-
 			if( info.length() > 0 ) {
 				LogManager::GetLogManager()->Log(
 						LOG_STAT,
@@ -2597,71 +2631,32 @@ bool DBManager::UpdateEmailSystem(
 						info.c_str()
 						);
 
-				PhpObject phpObjectInfo;
-				bool bResult = phpObjectInfo.UnSerialize(info);
+				Json::Reader reader;
+				bool bResult = reader.parse(info.c_str(), infoOrignal);
+
 				LogManager::GetLogManager()->Log(
 						LOG_MSG,
 						"DBManager::UpdateEmailSystem( "
 						"tid : %d, "
 						"[更新一大堆东西(更新)], "
 						"phpObjectInfo.UnSerialize : %s, "
-						"phpObjectInfo.isArray() : %s, "
-						"phpObjectInfo.isMap() : %s, "
 						"phpObjectInfo.size() : %d "
 						")",
 						(int)syscall(SYS_gettid),
 						bResult?"true":"false",
-						phpObjectInfo.isArray()?"true":"false",
-						phpObjectInfo.isMap()?"true":"false",
-						phpObjectInfo.size()
+						infoOrignal.size()
 						);
 
-				/**
-				 * Mark by Max 2016/07/11
-				 * 不需要清空数据库字段
-				 */
-//				if( bResult && phpObjectInfo.isArray() && phpObjectInfo.size() == 1 ) {
-//					PhpObject* pItem = phpObjectInfo.GetObjectByIndex(0);
-//					if( pItem != NULL && pItem->isMap() && (*pItem)["admireInfo"].isObject() ) {
-//						LogManager::GetLogManager()->Log(
-//								LOG_STAT,
-//								"DBManager::UpdateEmailSystem( "
-//								"tid : %d, "
-//								"[更新一大堆东西(更新)], "
-//								"(*pItem)[\"admireInfo\"] : %s "
-//								")",
-//								(int)syscall(SYS_gettid),
-//								(*pItem)["admireInfo"].asString().c_str()
-//								);
-//						(*pItem)["admireInfo"] = "";
-//					}
-//				}
-//				phpObjectWomanInfo["admireInfo"] = "";
-
-				/**
-				 * Modify by Max 2018/04/13
-				 * 如果原来已经存在意向信, 追加到后面, 否则创建一个新的信件
-				 */
-				if( bResult ) {
-					if( phpObjectInfo.isArray() ) {
-						// 原来是Array的格式
-						// 使用原来的信件
-						phpObjectAdmireInfo = phpObjectInfo;
-					} else if( phpObjectInfo.isMap() ) {
-						// 原来是Map的格式
-						// 放入原来的信件
-						phpObjectAdmireInfo.Append(phpObjectInfo);
-					}
-				}
+				// 插入新的信件
+				infoOrignal.append(infoNew);
 			}
 
-			// 放入新的信件
-			phpObjectAdmireInfo.Append(phpObjectWomanInfo, 0);
 			// 序列化
-			admireInfo = phpObjectAdmireInfo.Serialize();
+			Json::FastWriter writer;
+			admireInfo = writer.write(infoOrignal);
 
 			snprintf(sql, MAXBIGSQLSIZE - 1,
-					"UPDATE msg_process_list "
+					"UPDATE msg_process_list_json "
 					"SET number = %d, "
 					"lastupdatetime = DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\"), "
 					"info = '%s' "
@@ -2705,9 +2700,14 @@ bool DBManager::UpdateEmailSystem(
 			char senthour[64];
 			sprintf(senthour, "%lld", (man.id % 24));
 
-			admireInfo = phpObjectWomanInfo.Serialize();
+			// 序列化
+			Json::FastWriter writer;
+			// 插入新的信件
+			infoOrignal.append(infoNew);
+			admireInfo = writer.write(infoOrignal);
+
 			snprintf(sql, MAXBIGSQLSIZE - 1,
-					"INSERT INTO msg_process_list "
+					"INSERT INTO msg_process_list_json "
 					"SET manid = '%s', "
 					"firstname = '%s', "
 					"lastname = '%s', "
@@ -2720,7 +2720,8 @@ bool DBManager::UpdateEmailSystem(
 					"info = '%s', "
 					"number = 1, "
 					"lastupdatetime = DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\"), "
-					"status = 'N' "
+					"status = 'N', "
+					"sub_siteid = %s "
 					";",
 					man.manId.c_str(),
 					SqlTransferInsert(man.manName).c_str(),
@@ -2729,7 +2730,8 @@ bool DBManager::UpdateEmailSystem(
 					man.sid.c_str(),
 					senthour,
 					lady.mSiteId,
-					SqlTransferInsert(admireInfo).c_str()
+					SqlTransferInsert(admireInfo).c_str(),
+					man.subSiteId.c_str()
 			);
 
 			LogManager::GetLogManager()->Log(
@@ -2783,6 +2785,369 @@ bool DBManager::UpdateEmailSystem(
 
 	return bFlag;
 }
+
+//bool DBManager::UpdateEmailSystem(
+//		const Man& man,
+//		const Lady& lady,
+//		string admireBody,
+//		const AdmireTemplate& admireTemplate,
+//		unsigned long long iInsertId
+//		) {
+//	LogManager::GetLogManager()->Log(
+//			LOG_STAT,
+//			"DBManager::UpdateEmailSystem( "
+//			"tid : %d, "
+//			"[更新一大堆东西], "
+//			"manId : %s, "
+//			"womanId : %s, "
+//			"siteId : %d, "
+//			"admireBody : %s, "
+//			"templateType : %s, "
+//			"iInsertId : %d "
+//			")",
+//			(int)syscall(SYS_gettid),
+//			man.manId.c_str(),
+//			lady.mWomanId.c_str(),
+//			lady.mSiteId,
+//			admireBody.c_str(),
+//			admireTemplate.templateType.c_str(),
+//			iInsertId
+//			);
+//
+//	bool bFlag = false;
+//
+//	unsigned int iHandleTime = GetTickCount();
+//
+//	RESDataList res;
+//	MYSQL_RES* pSQLRes = NULL;
+//	short shIdt = 0;
+//	int iRow = 0;
+//	char sql[MAXBIGSQLSIZE] = {'\0'};
+//
+//	string id;
+//	int number = 0;
+//	string info = "";
+//	string admireInfo = "";
+//
+//	PhpObject phpObjectWomanInfo;
+//
+//	if( iInsertId != 0 ) {
+//		// 根据女士信息生成数据
+//		phpObjectWomanInfo["birthday"] 		= lady.birthday;
+//		phpObjectWomanInfo["firstname"] 	= lady.mWomanName;
+//		phpObjectWomanInfo["lastname"]  	= lady.lastname;
+//		phpObjectWomanInfo["country"]   	= lady.country;
+//		phpObjectWomanInfo["owner"]     	= lady.mAgentId;
+//		phpObjectWomanInfo["id"]        	= lady.id;
+//		phpObjectWomanInfo["womanid"]   	= lady.mWomanId;
+//		phpObjectWomanInfo["height"]   		= lady.height;
+//		phpObjectWomanInfo["weight"]   		= lady.weight;
+//		phpObjectWomanInfo["marry"]     	= lady.marry;
+//		phpObjectWomanInfo["admireInfo"]	= admireBody.substr(0, 200);
+//		char temp[64];
+//		sprintf(temp, "%lld", iInsertId);
+//		phpObjectWomanInfo["admireId"]		= EncryptWin(temp);
+//		phpObjectWomanInfo["province"]  	= lady.province;
+//
+//		/**
+//		 * Add by Max 2016/07/11
+//		 * 增加发送时间和模版类型
+//		 */
+//		phpObjectWomanInfo["template_type"]  	= admireTemplate.templateType;
+//
+//		time_t stm = time(NULL);
+//		struct tm tTime;
+//		localtime_r(&stm, &tTime);
+//		char sendTime[128] = {'\0'};
+//		snprintf(sendTime, 64, "%d-%02d-%02d %02d:%02d:%02d", tTime.tm_year+1900, tTime.tm_mon+1, tTime.tm_mday, tTime.tm_hour, tTime.tm_min, tTime.tm_sec);
+//		/**
+//		 * Modify by Max 2017/11/22
+//		 * 修改sendtime为send_time
+//		 */
+//		phpObjectWomanInfo["send_time"]  	= sendTime;
+//		/* Add end */
+//
+//		bFlag = true;
+//	}
+//
+//	if( bFlag ) {
+//		bFlag = false;
+//
+//		snprintf(sql, MAXBIGSQLSIZE - 1,
+//				"SELECT id, number, info "
+//				"FROM msg_process_list "
+//				"WHERE manid = '%s' "
+//				"AND womansiteid = %d "
+//				"AND type = 2 "
+//				"AND status = 'N' "
+//				";",
+//				man.manId.c_str(),
+//				lady.mSiteId
+//		);
+//
+//		LogManager::GetLogManager()->Log(
+//				LOG_MSG,
+//				"DBManager::UpdateEmailSystem( "
+//				"tid : %d, "
+//				"[更新一大堆东西], "
+//				"sql : %s "
+//				")",
+//				(int)syscall(SYS_gettid),
+//				sql
+//				);
+//
+//		int ret = mDBSpoolEmail.ExecuteSQL(sql, &pSQLRes, shIdt, iRow);
+//		if ( SQL_TYPE_SELECT == ret ) {
+//			int iFields = mysql_num_fields(pSQLRes);
+//			if (iFields > 0) {
+//				MYSQL_ROW row;
+//				mysql_fetch_fields(pSQLRes);
+//
+//				for (int i = 0; i < iRow; i++) {
+//					if ((row = mysql_fetch_row(pSQLRes)) == NULL) {
+//						break;
+//					}
+//
+//					id = row[0];
+//					if( row[1] != NULL ) {
+//						number = atoi(row[1]);
+//					}
+//					info = row[2];
+//
+//					bFlag = true;
+//
+//				}
+//			}
+//		} else {
+//			LogManager::GetLogManager()->Log(
+//					LOG_WARNING,
+//					"DBManager::UpdateEmailSystem( "
+//					"tid : %d, "
+//					"[更新一大堆东西, 失败], "
+//					"sql : %s, "
+//					"ret : %d "
+//					")",
+//					(int)syscall(SYS_gettid),
+//					sql,
+//					ret
+//					);
+//		}
+//		mDBSpoolEmail.ReleaseConnection(shIdt);
+//
+//		LogManager::GetLogManager()->Log(
+//				LOG_STAT,
+//				"DBManager::UpdateEmailSystem( "
+//				"tid : %d, "
+//				"[更新一大堆东西], "
+//				"bFlag : %s "
+//				")",
+//				(int)syscall(SYS_gettid),
+//				bFlag?"true":"false"
+//				);
+//
+//		if( bFlag ) {
+//			PhpObject phpObjectAdmireInfo;
+//
+//			if( info.length() > 0 ) {
+//				LogManager::GetLogManager()->Log(
+//						LOG_STAT,
+//						"DBManager::UpdateEmailSystem( "
+//						"tid : %d, "
+//						"[更新一大堆东西(更新)], "
+//						"info : %s "
+//						")",
+//						(int)syscall(SYS_gettid),
+//						info.c_str()
+//						);
+//
+//				PhpObject phpObjectInfo;
+//				bool bResult = phpObjectInfo.UnSerialize(info);
+//				LogManager::GetLogManager()->Log(
+//						LOG_MSG,
+//						"DBManager::UpdateEmailSystem( "
+//						"tid : %d, "
+//						"[更新一大堆东西(更新)], "
+//						"phpObjectInfo.UnSerialize : %s, "
+//						"phpObjectInfo.isArray() : %s, "
+//						"phpObjectInfo.isMap() : %s, "
+//						"phpObjectInfo.size() : %d "
+//						")",
+//						(int)syscall(SYS_gettid),
+//						bResult?"true":"false",
+//						phpObjectInfo.isArray()?"true":"false",
+//						phpObjectInfo.isMap()?"true":"false",
+//						phpObjectInfo.size()
+//						);
+//
+//				/**
+//				 * Mark by Max 2016/07/11
+//				 * 不需要清空数据库字段
+//				 */
+////				if( bResult && phpObjectInfo.isArray() && phpObjectInfo.size() == 1 ) {
+////					PhpObject* pItem = phpObjectInfo.GetObjectByIndex(0);
+////					if( pItem != NULL && pItem->isMap() && (*pItem)["admireInfo"].isObject() ) {
+////						LogManager::GetLogManager()->Log(
+////								LOG_STAT,
+////								"DBManager::UpdateEmailSystem( "
+////								"tid : %d, "
+////								"[更新一大堆东西(更新)], "
+////								"(*pItem)[\"admireInfo\"] : %s "
+////								")",
+////								(int)syscall(SYS_gettid),
+////								(*pItem)["admireInfo"].asString().c_str()
+////								);
+////						(*pItem)["admireInfo"] = "";
+////					}
+////				}
+////				phpObjectWomanInfo["admireInfo"] = "";
+//
+//				/**
+//				 * Modify by Max 2018/04/13
+//				 * 如果原来已经存在意向信, 追加到后面, 否则创建一个新的信件
+//				 */
+//				if( bResult ) {
+//					if( phpObjectInfo.isArray() ) {
+//						// 原来是Array的格式
+//						// 使用原来的信件
+//						phpObjectAdmireInfo = phpObjectInfo;
+//					} else if( phpObjectInfo.isMap() ) {
+//						// 原来是Map的格式
+//						// 放入原来的信件
+//						phpObjectAdmireInfo.Append(phpObjectInfo);
+//					}
+//				}
+//			}
+//
+//			// 放入新的信件
+//			phpObjectAdmireInfo.Append(phpObjectWomanInfo, 0);
+//			// 序列化
+//			admireInfo = phpObjectAdmireInfo.Serialize();
+//
+//			snprintf(sql, MAXBIGSQLSIZE - 1,
+//					"UPDATE msg_process_list "
+//					"SET number = %d, "
+//					"lastupdatetime = DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\"), "
+//					"info = '%s' "
+//					"WHERE id = %s "
+//					";",
+//					number + 1,
+//					SqlTransferInsert(admireInfo).c_str(),
+//					id.c_str()
+//			);
+//
+//			LogManager::GetLogManager()->Log(
+//					LOG_MSG,
+//					"DBManager::UpdateEmailSystem( "
+//					"tid : %d, "
+//					"[更新一大堆东西(更新)], "
+//					"sql : %s "
+//					")",
+//					(int)syscall(SYS_gettid),
+//					sql
+//					);
+//
+//			res.clear();
+//			if ( SQL_TYPE_UPDATE == mDBSpoolEmail.ExecuteSQL(sql, &res, iRow) ) {
+//				if( iRow > 0 ) {
+//					bFlag = true;
+//				}
+//			} else {
+//				LogManager::GetLogManager()->Log(
+//						LOG_WARNING,
+//						"DBManager::UpdateEmailSystem( "
+//						"tid : %d, "
+//						"[更新一大堆东西(更新), 失败], "
+//						"sql : %s "
+//						")",
+//						(int)syscall(SYS_gettid),
+//						sql
+//						);
+//			}
+//
+//		} else {
+//			char senthour[64];
+//			sprintf(senthour, "%lld", (man.id % 24));
+//
+//			admireInfo = phpObjectWomanInfo.Serialize();
+//			snprintf(sql, MAXBIGSQLSIZE - 1,
+//					"INSERT INTO msg_process_list "
+//					"SET manid = '%s', "
+//					"firstname = '%s', "
+//					"lastname = '%s', "
+//					"email = '%s', "
+//					"sid = '%s', "
+//					"type = 2, "
+//					"addtime = DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\"), "
+//					"senthour = %s, "
+//					"womansiteid = %d, "
+//					"info = '%s', "
+//					"number = 1, "
+//					"lastupdatetime = DATE_FORMAT(NOW(), \"%%Y-%%m-%%d %%H-%%i-%%s\"), "
+//					"status = 'N', "
+//					"sub_siteid = %s "
+//					";",
+//					man.manId.c_str(),
+//					SqlTransferInsert(man.manName).c_str(),
+//					SqlTransferInsert(man.lastName).c_str(),
+//					SqlTransferInsert(man.email).c_str(),
+//					man.sid.c_str(),
+//					senthour,
+//					lady.mSiteId,
+//					SqlTransferInsert(admireInfo).c_str(),
+//					man.subSiteId.c_str()
+//			);
+//
+//			LogManager::GetLogManager()->Log(
+//					LOG_MSG,
+//					"DBManager::UpdateEmailSystem( "
+//					"tid : %d, "
+//					"[更新一大堆东西(插入)], "
+//					"sql : %s "
+//					")",
+//					(int)syscall(SYS_gettid),
+//					sql
+//					);
+//
+//			res.clear();
+//			if ( SQL_TYPE_INSERT == mDBSpoolEmail.ExecuteSQL(sql, &res, iRow) ) {
+//				if( iRow > 0 ) {
+//					bFlag = true;
+//				}
+//			} else {
+//				LogManager::GetLogManager()->Log(
+//						LOG_ERR_USER,
+//						"DBManager::UpdateEmailSystem( "
+//						"tid : %d, "
+//						"[更新一大堆东西(插入), 失败], "
+//						"sql : %s "
+//						")",
+//						(int)syscall(SYS_gettid),
+//						sql
+//						);
+//			}
+//
+//		}
+//
+//	}
+//
+//	iHandleTime =  GetTickCount() - iHandleTime;
+//
+//	LogManager::GetLogManager()->Log(
+//			LOG_STAT,
+//			"DBManager::UpdateEmailSystem( "
+//			"tid : %d, "
+//			"[更新一大堆东西], "
+//			"bFlag : %s, "
+//			"iHandleTime : %u ms, "
+//			"end "
+//			")",
+//			(int)syscall(SYS_gettid),
+//			bFlag?"true":"false",
+//			iHandleTime
+//			);
+//
+//	return bFlag;
+//}
 
 int DBManager::GetIndexBySiteId(int siteId) {
 	int index = INVALID_INDEX;
@@ -3207,7 +3572,7 @@ bool DBManager::CheckEMF(const Man& man, const Lady& lady) {
 
 	if( bFlag ) {
 		snprintf(sql, MAXSQLSIZE - 1,
-				"SELECT mw_num, wm_reply_num, integral "
+				"SELECT mw_num, wm_reply_num, livechat, lovecall, videodate, videoshow, virtual_gifts "
 				"FROM relation "
 				"WHERE womanid = '%s' "
 				"AND manid = '%s' "
@@ -3227,14 +3592,22 @@ bool DBManager::CheckEMF(const Man& man, const Lady& lady) {
 						break;
 					}
 
-					if( strcmp(row[0], "0") != 0 || strcmp(row[1], "0") != 0 ) {
+					if( strcmp(row[0], "0") != 0 			// mw_num
+							|| strcmp(row[1], "0") != 0		// wm_reply_num
+							|| strcmp(row[2], "0") != 0		// livechat
+							|| strcmp(row[3], "0") != 0		// lovecall
+							|| strcmp(row[4], "0") != 0		// videodate
+							|| strcmp(row[5], "0") != 0		// videoshow
+							|| strcmp(row[6], "0") != 0		// virtual_gifts
+							) {
 						// 检查是否有EMF通信关系或者女士是否给男士发过首封EMF
 						bUpdate = true;
 						bFlag = false;
-					} else if( strcmp(row[1], "0") != 0 ){
-						// 检查男士是否发过BP信件给女士
-						bFlag = false;
 					}
+//					else if( strcmp(row[1], "0") != 0 ) {
+//						// 检查男士是否发过BP信件给女士
+//						bFlag = false;
+//					}
 				}
 			}
 		}
@@ -3897,6 +4270,49 @@ bool DBManager::SetAllLetterDelete(long long timestamp)
 	return bResult;
 }
 
+bool DBManager::CleanManTable() {
+	LogManager::GetLogManager()->Log(
+			LOG_STAT,
+			"DBManager::CleanManTable( "
+			"tid : %d, "
+			"[清空男士内存表] "
+			")",
+			(int)syscall(SYS_gettid)
+			);
+
+	bool bFlag = false;
+
+	char sql[MAXSQLSIZE] = {'\0'};
+	char *msg = NULL;
+
+	// 清空女士表
+	snprintf(sql, MAXSQLSIZE - 1, "DELETE FROM man;");
+
+	bFlag = ExecSQL( mdb, sql, &msg );
+	if( !bFlag ) {
+		LogManager::GetLogManager()->Log(
+				LOG_ERR_USER,
+				"DBManager::CleanManTable( "
+				"tid : %d, "
+				"[清空男士内存表, 失败], "
+				"sql : %s, "
+				"msg : %s "
+				")",
+				(int)syscall(SYS_gettid),
+				sql,
+				msg
+				);
+		if( msg != NULL) {
+			sqlite3_free(msg);
+			msg = NULL;
+		}
+
+		return false;
+	}
+
+	return true;
+}
+
 void DBManager::SyncManFromDatabase() {
 	LogManager::GetLogManager()->Log(
 			LOG_MSG,
@@ -3992,7 +4408,7 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 		iSync = 0;
 
 		// 生成 INSERT 的SQL模板（比拼SQL语句快最少一个数量级）
-		string sql2 = "INSERT OR IGNORE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`, `admirerNotify`, `sid`, `lastName`, `email`, `mid`, `can_sent_";
+		string sql2 = "INSERT OR IGNORE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`, `admirerNotify`, `sid`, `lastName`, `email`, `mid`, `subSiteId`, `can_sent_";
 		sql2 += mpDbLady[i].mDefPostfix.c_str();
 		sql2 += "`";
 		for (DBRECVLIST::const_iterator iter = mpDbLady[i].mRecvList.begin();
@@ -4004,7 +4420,7 @@ bool DBManager::SyncManFromDatabaseLoginRecent() {
 			sql2 += "`";
 		}
 		sql2 += ") ";
-		sql2 += "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1";
+		sql2 += "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1";
 		for (DBRECVLIST::const_iterator iter = mpDbLady[i].mRecvList.begin();
 			iter != mpDbLady[i].mRecvList.end();
 			iter++)
@@ -4229,7 +4645,7 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 		iSync = 0;
 
 		// 生成 INSERT 的SQL模板（比拼SQL语句快最少一个数量级）
-		string sql2 = "INSERT OR IGNORE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`, `admirerNotify`, `sid`, `lastName`, `email`, `mid`, `can_sent_";
+		string sql2 = "INSERT OR IGNORE INTO man(`manid`, `manname`, `login_time`, `reg_time`, `paid_amount`, `admirerNotify`, `sid`, `lastName`, `email`, `mid`, `subSiteId`, `can_sent_";
 		sql2 += mpDbLady[i].mDefPostfix.c_str();
 		sql2 += "`";
 		for (DBRECVLIST::const_iterator iter = mpDbLady[i].mRecvList.begin();
@@ -4241,7 +4657,7 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 			sql2 += "`";
 		}
 		sql2 += ") ";
-		sql2 += "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1";
+		sql2 += "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1";
 		for (DBRECVLIST::const_iterator iter = mpDbLady[i].mRecvList.begin();
 			iter != mpDbLady[i].mRecvList.end();
 			iter++)
@@ -4342,8 +4758,12 @@ bool DBManager::SyncManFromDatabaseRegRecent() {
 
 					// 从数据库获取男士
 					Man man;
-					man.manId = row[0];
-					man.login_time = row[1];
+					if( row[0] != NULL ) {
+						man.manId = row[0];
+					}
+					if( row[1] != NULL ) {
+						man.login_time = row[1];
+					}
 					if( row[2] != NULL ) {
 						man.paidAmount = atof(row[2]);
 					}
@@ -4541,7 +4961,7 @@ bool DBManager::SyncManBasicInfo(Man& man) {
 	char sql[MAXSQLSIZE] = {'\0'};
 
 	snprintf(sql, MAXSQLSIZE - 1,
-			"SELECT info_basic.firstname, info_basic.submitdate, info_core.paid_amount, info_basic.lastname, info_core.email, info_core.id, info_core.sid "
+			"SELECT info_basic.firstname, info_basic.submitdate, info_core.paid_amount, info_basic.lastname, info_core.email, info_core.id, info_core.sid, info_core.sub_siteid "
 			"FROM info_basic, info_core "
 			"WHERE info_basic.manid = info_core.manid "
 			"AND info_basic.manid = '%s' "
@@ -4565,16 +4985,45 @@ bool DBManager::SyncManBasicInfo(Man& man) {
 
 				bFlag = true;
 
-				man.manName = row[0];
-				man.reg_time = row[1];
-				man.paidAmount = atof(row[2]);
-				man.lastName = row[3];
-				man.email = row[4];
+				if( row[0] != NULL ) {
+					man.manName = row[0];
+				}
+				if( row[1] != NULL ) {
+					man.reg_time = row[1];
+				}
+				if( row[2] != NULL ) {
+					man.paidAmount = atof(row[2]);
+				}
+				if( row[3] != NULL ) {
+					man.lastName = row[3];
+				}
+				if( row[4] != NULL ) {
+					man.email = row[4];
+				}
 				if( row[5] != NULL ) {
 					man.id = atoll(row[5]);
 				}
-				man.sid = row[6];
+				if( row[6] != NULL ) {
+					man.sid = row[6];
+				}
+				if( row[7] != NULL ) {
+					man.subSiteId = row[7];
+				}
 
+				LogManager::GetLogManager()->Log(
+						LOG_STAT,
+						"DBManager::SyncManBasicInfo( "
+						"tid : %d, "
+						"[从数据库同步男士基本信息], "
+						"manId : %s, "
+						"manName : %s, "
+						"subSiteId : %s "
+						")",
+						(int)syscall(SYS_gettid),
+						man.manId.c_str(),
+						man.manName.c_str(),
+						man.subSiteId.c_str()
+						);
 			}
 		}
 	}
@@ -4858,6 +5307,7 @@ bool DBManager::CreateTable(sqlite3 *db) {
 						"lastName TEXT, "
 						"email TEXT, "
 						"mid INT, "
+						"subSiteId TEXT, "
 						"%s "
 						");",
 						site.c_str()
@@ -5032,6 +5482,9 @@ bool DBManager::InsertManFromDataBase(sqlite3_stmt* stmtMan, const Man &man) {
 
 	// id
 	sqlite3_bind_int(stmtMan, 10, man.id);
+
+	// subSiteId
+	sqlite3_bind_text(stmtMan, 11, man.subSiteId.c_str(), man.subSiteId.length(), NULL);
 
 	sqlite3_step(stmtMan);
 
