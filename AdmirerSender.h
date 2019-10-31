@@ -9,7 +9,7 @@
 #ifndef AdmirerSender_H_
 #define AdmirerSender_H_
 
-#define VERSION_STRING "1.1.8"
+#define VERSION_STRING "1.1.9"
 
 #include <common/MessageList.h>
 #include "TcpServer.h"

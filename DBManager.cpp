@@ -2646,13 +2646,13 @@ bool DBManager::UpdateEmailSystem(
 						bResult?"true":"false",
 						infoOrignal.size()
 						);
-
-				// 插入新的信件
-				infoOrignal.append(infoNew);
 			}
 
+			// 插入新的信件
+			infoOrignal.append(infoNew);
+
 			// 序列化
-			Json::FastWriter writer;
+			Json::FastWriter writer(true);
 			admireInfo = writer.write(infoOrignal);
 
 			snprintf(sql, MAXBIGSQLSIZE - 1,
@@ -2701,7 +2701,7 @@ bool DBManager::UpdateEmailSystem(
 			sprintf(senthour, "%lld", (man.id % 24));
 
 			// 序列化
-			Json::FastWriter writer;
+			Json::FastWriter writer(true);
 			// 插入新的信件
 			infoOrignal.append(infoNew);
 			admireInfo = writer.write(infoOrignal);
